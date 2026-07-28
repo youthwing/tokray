@@ -1,0 +1,25 @@
+{
+  "name": "tokray",
+  "version": "0.1.0",
+  "description": "Inspect and govern coding-agent Token usage across local Agent and request logs.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "tokray": "./dist/main.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@tokray/adapters": "workspace:*",
+    "@tokray/core": "workspace:*",
+    "@tokray/node": "workspace:*",
+    "@tokray/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

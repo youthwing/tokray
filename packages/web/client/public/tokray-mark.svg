@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Tokray</title>
+  <desc id="desc">A token being scanned inside a context window</desc>
+  <rect x="2" y="2" width="60" height="60" rx="13" fill="#356fc4"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="12.25" fill="none" stroke="#7eaae6" stroke-width="1.5"/>
+  <path d="M23 15h-7v34h7M41 15h7v34h-7" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 43 42 21" fill="none" stroke="#cfe2ff" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="m32 24.75 7.25 7.25L32 39.25 24.75 32Z" fill="#356fc4" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/>
+</svg>

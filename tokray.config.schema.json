@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tokray.dev/schema/config-v1.json",
+  "title": "Tokray configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "agent": { "$ref": "#/$defs/id" },
+          "adapter": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "adapters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/adapter" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/|^$" },
+        "fallback": { "type": "string" }
+      }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/|^$" },
+        "equals": { "type": ["string", "number", "boolean", "null"] }
+      }
+    },
+    "agentCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readLogs",
+        "exactUsage",
+        "exactRequest",
+        "compactionMarkers",
+        "preToolHook",
+        "rewriteOutput",
+        "toolAllowlist",
+        "modelRouting",
+        "compactionControl"
+      ],
+      "properties": {
+        "readLogs": { "$ref": "#/$defs/support" },
+        "exactUsage": { "$ref": "#/$defs/support" },
+        "exactRequest": { "$ref": "#/$defs/support" },
+        "compactionMarkers": { "$ref": "#/$defs/support" },
+        "preToolHook": { "$ref": "#/$defs/support" },
+        "rewriteOutput": { "$ref": "#/$defs/support" },
+        "toolAllowlist": { "$ref": "#/$defs/support" },
+        "modelRouting": { "$ref": "#/$defs/support" },
+        "compactionControl": { "$ref": "#/$defs/support" }
+      }
+    },
+    "support": {
+      "enum": ["full", "partial", "none", "unknown"]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accounting", "exactSystemPrompt", "exactToolSchemas", "exactUsage", "compaction"],
+      "properties": {
+        "accounting": { "enum": ["exact-request", "usage-calibrated", "heuristic-only"] },
+        "exactSystemPrompt": { "type": "boolean" },
+        "exactToolSchemas": { "type": "boolean" },
+        "exactUsage": { "type": "boolean" },
+        "compaction": { "enum": ["none", "marker", "diff"] }
+      }
+    },
+    "timestamp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/|^$" },
+        "fallback": { "type": "string" },
+        "unit": { "enum": ["iso", "epoch-ms", "epoch-seconds"] }
+      }
+    },
+    "messages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/|^$" },
+        "rolePointer": { "type": "string", "pattern": "^/|^$" },
+        "contentPointer": { "type": "string", "pattern": "^/|^$" },
+        "sourcePointer": { "type": "string", "pattern": "^/|^$" },
+        "roleMap": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["system", "tool_schema", "skill", "memory", "user", "file_ref", "tool_result", "subagent", "thinking", "assistant", "summary", "unknown"]
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/|^$" },
+        "namePointer": { "type": "string", "pattern": "^/|^$" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputAccounting"],
+      "properties": {
+        "inputTokens": { "type": "string", "pattern": "^/|^$" },
+        "outputTokens": { "type": "string", "pattern": "^/|^$" },
+        "cacheReadTokens": { "type": "string", "pattern": "^/|^$" },
+        "cacheWriteTokens": { "type": "string", "pattern": "^/|^$" },
+        "reasoningOutputTokens": { "type": "string", "pattern": "^/|^$" },
+        "inputAccounting": { "enum": ["includes-cache", "excludes-cache", "unknown"] },
+        "source": { "enum": ["api", "log"] }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "agent", "schemaRange", "format", "capabilities", "agentCapabilities", "detect", "frame"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "$ref": "#/$defs/id" },
+        "agent": { "$ref": "#/$defs/id" },
+        "schemaRange": { "type": "string", "minLength": 1 },
+        "format": { "const": "jsonl" },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "agentCapabilities": { "$ref": "#/$defs/agentCapabilities" },
+        "detect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/match" } },
+            "nameIncludes": { "type": "string", "minLength": 1 }
+          }
+        },
+        "frame": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "messages"],
+          "properties": {
+            "when": { "$ref": "#/$defs/match" },
+            "timestamp": { "$ref": "#/$defs/timestamp" },
+            "model": { "$ref": "#/$defs/field" },
+            "provider": { "$ref": "#/$defs/field" },
+            "system": { "$ref": "#/$defs/field" },
+            "messages": { "$ref": "#/$defs/messages" },
+            "tools": { "$ref": "#/$defs/tools" },
+            "usage": { "$ref": "#/$defs/usage" }
+          }
+        }
+      }
+    }
+  }
+}

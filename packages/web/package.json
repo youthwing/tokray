@@ -1,0 +1,47 @@
+{
+  "name": "@tokray/web",
+  "version": "0.1.0",
+  "description": "Local web interface for Tokray context analysis.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./server": {
+      "types": "./dist-server/server.d.ts",
+      "default": "./dist-server/server.js"
+    }
+  },
+  "files": [
+    "dist-server",
+    "web-dist"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"pnpm run dev:api\" \"pnpm run dev:web\"",
+    "dev:api": "TOKRAY_WEB_DEV=1 node --watch --experimental-strip-types server/server.ts",
+    "dev:web": "vite --host 127.0.0.1 --port 4319",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "node dist-server/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@tanstack/react-query": "^5.83.0",
+    "@tanstack/react-virtual": "^3.14.8",
+    "@tokray/node": "workspace:*",
+    "echarts": "^5.6.0",
+    "echarts-for-react": "^3.0.2",
+    "hono": "^4.8.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "concurrently": "^9.2.0",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  }
+}

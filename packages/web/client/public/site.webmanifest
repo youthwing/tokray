@@ -1,0 +1,17 @@
+{
+  "name": "Tokray Context Auditor",
+  "short_name": "Tokray",
+  "description": "Inspect context growth, tool overhead, usage, and compaction in coding-agent sessions.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1116",
+  "theme_color": "#356fc4",
+  "icons": [
+    {
+      "src": "/tokray-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
