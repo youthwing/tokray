@@ -2,6 +2,10 @@ import type {
   AgentSourceStatus,
   ActionReceipt,
   AnalysisReport,
+  CodexHookConnectionApplyResult,
+  CodexHookConnectionPreview,
+  CodexHookRuntimeStatus,
+  CodexHookSelfTestResult,
   ConversationEntry,
   HookBridgeAgent,
   HookBridgeApplyResult,
@@ -12,6 +16,7 @@ import type {
   NativeFilterProfile,
   NativeFilterResult,
   NativeGovernanceStrategy,
+  NativeRequestGovernanceResult,
   RtkComparisonExecution,
   RtkIntegrationStatus,
   RtkRewritePreview,
@@ -41,6 +46,17 @@ export const api = {
   sessionConversation: (sessionId: string) => request<ConversationEntry[]>(`/api/analyses/${encodeURIComponent(sessionId)}/conversation`),
   rtkStatus: () => request<RtkIntegrationStatus>('/api/integrations/rtk'),
   nativeStrategies: () => request<NativeGovernanceStrategy[]>('/api/governance/native-strategies'),
+  previewNativeRequest: (input: {
+    request: Record<string, unknown>;
+    maxInputTokens?: number;
+    allowedTools?: string[];
+    compactToolDescriptions?: boolean;
+    deduplicateTools?: boolean;
+  }) => request<NativeRequestGovernanceResult>('/api/governance/native-request/preview', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }),
   previewNativeFilter: (input: { output: string; profile: NativeFilterProfile; command?: string; exitCode?: number }) => request<NativeFilterResult>('/api/integrations/native-filter/preview', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -74,6 +90,16 @@ export const api = {
       approved: true,
     }),
   }),
+  previewCodexHookConnection: () => request<CodexHookConnectionPreview>('/api/integrations/hooks/codex/preview', {
+    method: 'POST',
+  }),
+  applyCodexHookConnection: (preview: CodexHookConnectionPreview) => request<CodexHookConnectionApplyResult>('/api/integrations/hooks/codex/apply', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ approved: true, expectedAfterHash: preview.afterHash }),
+  }),
+  codexHookStatus: () => request<CodexHookRuntimeStatus>('/api/integrations/hooks/codex/status'),
+  selfTestCodexHook: () => request<CodexHookSelfTestResult>('/api/integrations/hooks/codex/self-test', { method: 'POST' }),
   receipts: () => request<ActionReceipt[]>('/api/governance/receipts'),
   rollbackReceipt: (receiptId: string) => request<ActionReceipt>(`/api/governance/receipts/${encodeURIComponent(receiptId)}/rollback`, {
     method: 'POST',

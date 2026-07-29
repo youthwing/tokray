@@ -1,9 +1,11 @@
 # Tokray 产品发展规划书
 
-> 文档状态：执行中（M0 已完成，M1/M2 进行中）
+> 文档状态：执行中（M0 已完成，M1 维护，M2 聚焦单一闭环）
 > 规划周期：未来 6-12 个月，按里程碑推进
 > 产品属性：开源、厂商中立、Local-first、自托管优先
 > 核心方向：从 Context Token X-ray 演进为 Agent Token 效率与上下文治理平台
+
+> **当前范围锁定（2026-07-28）**：近期只完成一件事，即在一个本地 Codex 会话中跑通“发现高成本工具输出 -> 预览 Tokray Native 过滤 -> 用户批准并信任 `PostToolUse` Hook -> 用后续 Provider Usage 与任务质量信号验证 -> 可回滚”。Request Governor 保留为独立实验能力，不纳入 Codex 端到端闭环声明。该闭环完成前，新增 Agent 适配器、跨会话/团队能力、模型路由、工作流编排、自托管和 RTK 横向扩展全部冻结。
 
 ## 1. 执行摘要
 
@@ -279,16 +281,18 @@ UI 只展示适配器真实具备的动作。缺少能力时显示“仅建议�
 
 ### 7.1 产品关系
 
-Tokray 需要同时承担发现、决策、原生治理和验证职责。内置引擎提供厂商中立、确定性、无需外部依赖的工具输出过滤；RTK 继续作为可选外部 Provider，擅长在命令执行前重写其支持的 Shell 命令。两者可按 Agent 独立注册并共存。
+Tokray 需要同时承担发现、决策、原生治理和验证职责。内置引擎提供厂商中立、确定性、无需外部依赖的模型请求治理与工具输出过滤；RTK 继续作为可选外部 Provider，擅长在命令执行前重写其支持的 Shell 命令。两者可按 Agent 独立注册并共存。
 
-内置引擎覆盖八个治理面：工具输出过滤、渐进式披露、上下文去重、工具 Schema 按需加载、记忆外化、稳定缓存前缀、Compaction 保护和确定性工作流外置。当前只有工具输出过滤是可执行转换；去重、Schema、记忆、缓存和 Compaction 先提供证据诊断；渐进式披露与工作流外置仍处于规划阶段。
+内置引擎覆盖九个治理面：模型请求、工具输出、渐进式披露、上下文去重、工具 Schema 按需加载、记忆外化、稳定缓存前缀、Compaction 保护和确定性工作流外置。当前模型请求治理与工具输出过滤是可执行转换；上下文去重、Schema、记忆、缓存和 Compaction 先提供证据诊断；渐进式披露与工作流外置仍处于规划阶段。
+
+模型请求治理直接接受 OpenAI、Anthropic 兼容请求体：保持 `system/messages/input` 不变，压缩工具描述，移除完全相同的重复定义，仅在用户显式提供 allowlist 时裁剪具名工具，并用估算输入预算返回 `sendAllowed`。它能生成可发送的候选请求，但在厂商 Hook 或请求代理未验证接入前，不宣称已自动控制 Claude Code、Codex 等 Agent。
 
 ### 7.2 集成闭环
 
 ```text
-发现高成本工具输出
--> 选择 Tokray Native 或 RTK Provider
--> 原始/治理后输出预览
+发现高成本请求或工具输出
+-> 选择 Tokray Native 请求治理、输出过滤或 RTK Provider
+-> 原始/治理后请求与输出预览
 -> 估算信息损失与 Token 收益
 -> 用户批准安装 Agent Hook
 -> 采集 Provider 指标和后续 Usage
@@ -298,7 +302,8 @@ Tokray 需要同时承担发现、决策、原生治理和验证职责。内置�
 
 ### 7.3 Tokray Native 与 RTK 的职责
 
-- Tokray Native 在工具返回后工作，可覆盖非 Shell 工具输出，并以失败透传为默认边界；
+- Tokray Native Request Governor 在模型调用前工作，输出完整治理后请求，并以 `sendAllowed` 执行估算输入预算门禁；
+- Tokray Native 输出过滤在工具返回后工作，可覆盖非 Shell 工具输出，并以失败透传为默认边界；
 - RTK 在命令执行前工作，通过官方二进制改写其支持的 Shell 命令；
 - 使用实际 Tokenizer 或供应商 Usage 校正 `bytes / 4` 估算；
 - 计算工具结果在后续调用中的累计驻留成本；
@@ -317,6 +322,7 @@ Tokray 需要同时承担发现、决策、原生治理和验证职责。内置�
 - 高风险命令只透传；
 - 所有修改保存 diff 和回滚入口；
 - 不把 Native 或 RTK 的输出缩减率直接当作账单节省率。
+- 不把序列化请求体的估算缩减率当作供应商 tokenizer 或账单 Usage。
 
 ## 8. 部署与数据边界
 
@@ -488,7 +494,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - 自定义 JSONL 格式无需编写 TS 即可产生标准 Frame；
 - 适配器明确展示缺失能力，不虚构数据。
 
-当前进度（2026-07-27）：
+当前进度（2026-07-28）：
 
 - [x] 文件发现变更订阅、SSE `connected/heartbeat/sessions-changed` 和 60 秒断线轮询兜底；
 - [x] 实时监控页：倒序活动流、自动跟随/暂停、当前上下文、本轮新增、缓存复用、累计输入和证据问题；
@@ -498,7 +504,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - [x] CodeBuddy/Trae 可观测性调研；本机 Trae 核心存储为不透明数据，当前只展示检测结果并明确要求 Hook/请求采集器；
 - [x] Agent 能力矩阵和中英文术语库首版；
 - [ ] Cursor、Cline/Roo、Continue 中至少两个基于真实样本的解析适配器；
-- [ ] CodeBuddy/Trae Hook Bridge 原型，不能在缺少真实可读日志时伪造“首版适配器”；
+- [x] Tokray-managed CodeBuddy/Trae Hook Bridge 注册原型；它不等于已连接厂商原生 Hook，也不伪造不可读日志的“首版适配器”；
 - [ ] YAML 配置入口、1 万会话压力基准与“2 秒内进入 UI”的自动化验收。
 
 ### 里程碑 M2：治理规则与 RTK 闭环，4-6 周
@@ -510,7 +516,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - 治理问题中心；
 - 首批规则包：大输出、长期驻留、重复内容、空闲工具、缓存异常、预算超限；
 - 策略作用域和 `observe/suggest/approve/enforce` 模式；
-- Tokray Native 输出过滤，以及 RTK 检测、预览、配置和收益导入；
+- Tokray Native 请求治理与输出过滤，以及 RTK 检测、预览、配置和收益导入；
 - Claude Code、CodeBuddy、Trae Hook Bridge 原型；
 - 操作预览、Receipt 和回滚记录。
 
@@ -521,7 +527,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - 能区分输出缩减率与实际输入 Token 节省；
 - 默认状态下不自动修改任何 Agent 配置。
 
-当前进度（2026-07-27）：
+当前进度（2026-07-28）：
 
 - [x] 会话治理区按“需要处理 / 优化机会 / 正常信号”分组，不使用不透明综合分；
 - [x] `context.duplicate-content`：只检测同一 Frame 内同时存在、内容指纹一致且预计浪费不少于 1k Token 的可治理内容块，并保留全部 `SourceRef`；
@@ -530,15 +536,18 @@ full-content   发送脱敏后的原始内容，显式开启
 - [x] 厂商中立 `ActionProposal` 协议、执行位置、Agent 能力门槛和独立治理行动队列；当前只生成不会写文件或修改运行时的预览，并明确动作仅影响未来调用；
 - [x] 可选 RTK Provider：跨平台发现并校验官方二进制，安全导入 `rtk gain --all --format json`，通过 `rtk rewrite` 只预览命令改写且不执行命令；UI 将 `bytes / 4` Bash 输出缩减与真实模型输入节省分开；
 - [x] Tokray Native 输出治理：支持终端噪声清理、进度折叠、连续重复折叠、JSON 词法压缩、诊断窗口保留和低信号区段省略；暴露规则、风险、计量方法和适用范围，异常时原样透传；
-- [x] 多治理面策略注册表：八个治理面分别标记 `available / diagnose / planned`，不把诊断或路线图伪装成已可执行能力；
+- [x] Tokray Native 请求治理：支持 OpenAI/Anthropic 兼容请求体、工具描述压缩、完全重复定义去重、显式工具 allowlist、估算输入预算门禁和消息/工具契约完整性断言；CLI、Web API 与治理工作台共用同一实现；
+- [x] 多治理面策略注册表：九个治理面分别标记 `available / diagnose / planned`，不把诊断或路线图伪装成已可执行能力；
 - [ ] 可配置预算、规则参数与策略作用域；
 - [ ] 跨会话治理问题聚合；
 - [x] RTK 原始/压缩输出逐项比较：仅允许显式批准的低风险命令白名单，不经过 Shell，原命令与 RTK 命令各执行一次，并保存 `bytes / 4`、退出码、耗时、输出预览与 Receipt；
 - [x] Tokray 管理的多 Provider Hook Bridge 原型：支持 Claude Code、Codex、CodeBuddy、Trae 分别注册 Tokray Native 与 RTK，提供 `tokray hook filter` / `tokray hook rewrite`、预览、显式写入、Receipt 和内容哈希保护回滚；不会修改 Agent 原生配置，也不把“已注册”说成“厂商 Hook 已连接”；
+- [x] Codex `PostToolUse` 命令 Hook 调度适配：识别官方事件 JSON，对字符串及可证明为纯文本的 `output`、`text`、文本内容块返回 `continue:false` 替换反馈；未知结构化或二进制结果保持透传；
+- [x] Codex 项目级 Hook 安装器：结构化合并 `.codex/hooks.json`，通过预览哈希显式批准，保存 Receipt 与回滚状态，并明确安装后仍需在 `/hooks` 中信任；
 - [ ] 基于真实厂商 Hook 接口的 Claude Code 安装器，以及 CodeBuddy/Trae 原生 Hook 样本验证；
 - [ ] 用后续 Provider Usage 和任务质量信号验证真实输入 Token 节省。
 
-### 里程碑 M3：优化模拟与实验验证，4-6 周
+### 里程碑 M3：优化模拟与实验验证，4-6 周（M2 闭环前冻结）
 
 目标：让优化建议具有可量化、可复现的结果。
 
@@ -558,7 +567,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - 预测与实际偏差可观测；
 - 报告不把缺少质量数据的节省描述为“无损”。
 
-### 里程碑 M4：Token-aware 工作流，6-10 周
+### 里程碑 M4：Token-aware 工作流，6-10 周（M2 闭环前冻结）
 
 目标：把重复的确定性步骤移出模型上下文。
 
@@ -578,7 +587,7 @@ full-content   发送脱敏后的原始内容，显式开启
 - 工作流失败不会丢失原始产物；
 - 不依赖可视化画布即可完整定义和运行。
 
-### 里程碑 M5：自托管与生态，持续推进
+### 里程碑 M5：自托管与生态，持续推进（M2 闭环前冻结）
 
 目标：支持团队治理和社区扩展。
 
@@ -691,16 +700,16 @@ full-content   发送脱敏后的原始内容，显式开启
 
 ## 17. 推荐的近期执行顺序
 
-1. 用本规划更新 `PRODUCT.md` 与 README 的产品定位；
-2. 定义 `AgentCapabilities`、`GovernanceFinding`、`PolicyDefinition` 三个核心契约；
-3. [已完成] 实时 Watcher + SSE，重构会话导航与搜索；
-4. [调研完成，Hook 待实现] CodeBuddy、Trae 的日志与 Hook 能力矩阵；
-5. [JSONL 已完成，YAML 待实现] 声明式适配器 MVP；
-6. 实现首批六项治理规则；
-7. 接入 RTK 预览、Hook 和 `gain` 验证；
-8. 建立优化实验模型；
-9. 在两个真实工作流上验证 Token-aware 编排；
-10. 验证闭环稳定后再开放低风险自动治理。
+近期只按以下顺序推进；前一步没有形成可验证证据时，不开启下一条产品线：
+
+1. [已完成] 从会话证据定位高成本工具结果，并生成确定性的 Tokray Native 过滤预览；
+2. [已完成] 幂等安装项目级 Codex `PostToolUse` Hook，保留 Receipt 与受保护回滚，并通过 Codex `hooks/list` 区分未配置、待信任、已生效与已失效；
+3. [已完成] 提供 `tokray hook status` 与 `tokray hook self-test`，用 0 次模型调用验证 Bridge、Hook、信任和确定性输出过滤链路；
+4. [进行中] 在一个受控任务中记录治理前基线、治理后 Provider Usage、任务结果和必要的人工质量判断；首次 A/B 两组质量均通过，但治理组未触发 Hook，不能计为 Token 节省证据；
+5. [待完成] 将真实对照结果展示为一次实验，明确区分输出缩减估算、实际输入 Token、耗时和质量；
+6. [待完成] 验证回滚后关闭 M2；只有此时才重新评估 M3 或新增 Agent 适配器。
+
+不进入当前排期：策略作用域、跨会话聚合、团队预算、更多厂商 Hook、模型路由、Workflow Recipe、Collector/Server、安装包分发，以及新的 RTK 能力。发现这些需求时只记录，不实现。
 
 ---
 

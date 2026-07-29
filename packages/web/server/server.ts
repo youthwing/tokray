@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
   analyzeSession,
+  applyCodexHookConnection,
   applyHookBridge,
   discoverSessions,
   filterNativeOutput,
@@ -14,16 +15,20 @@ import {
   inspectAgentSources,
   invalidateSessionDiscovery,
   importRtkGain,
+  inspectCodexHookRuntime,
   inspectRtk,
   listActionReceipts,
   loadTokrayConfiguration,
   nativeGovernanceStrategies,
+  governNativeRequest,
+  previewCodexHookConnection,
   previewHookBridge,
   previewRtkRewrite,
   readFrameConversation,
   readSessionConversation,
   rollbackHookBridge,
   runApprovedRtkComparison,
+  selfTestCodexHook,
   subscribeSessionDiscovery,
 } from '@tokray/node';
 import type { AnalysisReport, HookBridgeAgent, HookBridgeProvider, NativeFilterProfile, SessionDiscoveryChange } from '@tokray/node';
@@ -32,15 +37,23 @@ import { WeightedLru } from './lru.js';
 export interface WebServerOptions {
   hostname?: string;
   port?: number;
+  hookCommandPrefix?: string;
 }
 
-const app = new Hono();
+export const app = new Hono();
 const analysisCache = new WeightedLru<string, { modifiedAt: number; report: AnalysisReport }>({
   maxEntries: 8,
   maxWeight: 120_000,
 });
 const pendingAnalyses = new Map<string, Promise<AnalysisReport>>();
 let discoveryCache: { at: number; sessions: Awaited<ReturnType<typeof discoverSessions>> } | undefined;
+let hookCommandPrefix = 'tokray';
+
+function hookDispatcher(agent: HookBridgeAgent, provider: HookBridgeProvider): string {
+  return provider === 'rtk'
+    ? `${hookCommandPrefix} hook rewrite --agent ${agent}`
+    : `${hookCommandPrefix} hook filter --agent ${agent} --profile auto`;
+}
 
 function displayPath(path: string): string {
   const home = homedir();
@@ -100,6 +113,37 @@ app.get('/api/integrations/rtk', async (context) => {
 
 app.get('/api/governance/native-strategies', (context) => {
   return context.json(nativeGovernanceStrategies());
+});
+
+app.post('/api/governance/native-request/preview', async (context) => {
+  const body = await context.req.json().catch(() => undefined) as Record<string, unknown> | undefined;
+  const request = body?.['request'];
+  if (request === null || typeof request !== 'object' || Array.isArray(request)) {
+    return context.json({ error: 'request must be a JSON object' }, 400);
+  }
+  const allowedTools = body?.['allowedTools'];
+  if (allowedTools !== undefined
+    && (!Array.isArray(allowedTools) || !allowedTools.every((name) => typeof name === 'string'))) {
+    return context.json({ error: 'allowedTools must be an array of strings' }, 400);
+  }
+  if (body?.['compactToolDescriptions'] !== undefined && typeof body['compactToolDescriptions'] !== 'boolean') {
+    return context.json({ error: 'compactToolDescriptions must be a boolean' }, 400);
+  }
+  if (body?.['deduplicateTools'] !== undefined && typeof body['deduplicateTools'] !== 'boolean') {
+    return context.json({ error: 'deduplicateTools must be a boolean' }, 400);
+  }
+  try {
+    return context.json(governNativeRequest(request as Record<string, unknown>, {
+      ...(body?.['maxInputTokens'] !== undefined ? { maxInputTokens: body['maxInputTokens'] as number } : {}),
+      ...(allowedTools !== undefined ? { allowedTools: allowedTools as string[] } : {}),
+      ...(typeof body?.['compactToolDescriptions'] === 'boolean'
+        ? { compactToolDescriptions: body['compactToolDescriptions'] }
+        : {}),
+      ...(typeof body?.['deduplicateTools'] === 'boolean' ? { deduplicateTools: body['deduplicateTools'] } : {}),
+    }));
+  } catch (error) {
+    return context.json({ error: error instanceof Error ? error.message : 'Native request preview failed' }, 400);
+  }
 });
 
 const nativeProfiles = new Set<NativeFilterProfile>(['auto', 'generic', 'test', 'build', 'json', 'git-status']);
@@ -193,7 +237,10 @@ app.post('/api/integrations/hooks/preview', async (context) => {
   const agent = hookAgent(body?.['agent']);
   const provider = hookProvider(body?.['provider']);
   if (!agent || !provider) return context.json({ error: 'Unsupported Hook Bridge agent or provider' }, 400);
-  return context.json(await previewHookBridge(agent, { provider }));
+  return context.json(await previewHookBridge(agent, {
+    provider,
+    dispatcherCommand: hookDispatcher(agent, provider),
+  }));
 });
 
 app.post('/api/integrations/hooks/apply', async (context) => {
@@ -209,9 +256,48 @@ app.post('/api/integrations/hooks/apply', async (context) => {
       approved: true,
       expectedAfterHash: body['expectedAfterHash'],
       registeredAt: body['registeredAt'],
-    }, { provider }));
+    }, {
+      provider,
+      dispatcherCommand: hookDispatcher(agent, provider),
+    }));
   } catch (error) {
     return context.json({ error: error instanceof Error ? error.message : 'Hook Bridge apply failed' }, 409);
+  }
+});
+
+app.post('/api/integrations/hooks/codex/preview', async (context) => {
+  return context.json(await previewCodexHookConnection({
+    dispatcherCommand: hookDispatcher('codex', 'tokray-native'),
+  }));
+});
+
+app.get('/api/integrations/hooks/codex/status', async (context) => {
+  return context.json(await inspectCodexHookRuntime({
+    dispatcherCommand: hookDispatcher('codex', 'tokray-native'),
+  }));
+});
+
+app.post('/api/integrations/hooks/codex/self-test', async (context) => {
+  return context.json(await selfTestCodexHook({
+    dispatcherCommand: hookDispatcher('codex', 'tokray-native'),
+  }));
+});
+
+app.post('/api/integrations/hooks/codex/apply', async (context) => {
+  const body = await context.req.json().catch(() => undefined) as Record<string, unknown> | undefined;
+  if (body?.['approved'] !== true) return context.json({ error: 'Explicit approval is required' }, 400);
+  if (typeof body['expectedAfterHash'] !== 'string') {
+    return context.json({ error: 'expectedAfterHash is required' }, 400);
+  }
+  try {
+    return context.json(await applyCodexHookConnection({
+      approved: true,
+      expectedAfterHash: body['expectedAfterHash'],
+    }, {
+      dispatcherCommand: hookDispatcher('codex', 'tokray-native'),
+    }));
+  } catch (error) {
+    return context.json({ error: error instanceof Error ? error.message : 'Codex Hook connection failed' }, 409);
   }
 });
 
@@ -329,6 +415,7 @@ if (process.env['TOKRAY_WEB_DEV'] !== '1') {
 export function startWebServer(options: WebServerOptions = {}) {
   const hostname = options.hostname ?? '127.0.0.1';
   const port = options.port ?? 4319;
+  hookCommandPrefix = options.hookCommandPrefix?.trim() || 'tokray';
   return serve({ fetch: app.fetch, hostname, port });
 }
 

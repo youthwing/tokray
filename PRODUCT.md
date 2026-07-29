@@ -18,10 +18,27 @@ Tokray currently provides the Monitor and evidence foundation:
 - attribute Token usage to messages, tools, schemas, files, memory, and compaction summaries;
 - expose provider-reported Usage, cache semantics, uncertainty, and source references;
 - diagnose context peaks, persistent blocks, tool overhead, cache efficiency, compaction, calibration, and parser issues;
+- govern complete OpenAI- and Anthropic-compatible model requests with tool-description compaction, exact-schema deduplication, explicit tool allowlists, and an estimated input-budget gate;
 - filter tool output with a deterministic built-in engine, preview optional RTK rewrites, run explicitly approved low-risk output comparisons, and register Provider-specific Hook Bridges with receipts and guarded rollback;
 - preserve raw content locally and avoid claiming data the source never recorded.
 
-The native engine currently executes tool-output filtering, diagnoses several additional context-governance surfaces, and labels progressive disclosure and workflow offload as planned. Configurable policy scopes, verified Agent-native Hook installers, broader optimization experiments, additional Agent adapters, and Token-aware workflows remain planned capabilities. A Tokray-managed Bridge registration must not be presented as a connected vendor Hook until that integration is verified.
+The native engine currently executes model-request governance and tool-output filtering, diagnoses several additional context-governance surfaces, and labels progressive disclosure and workflow offload as planned. Request governance produces a sendable candidate and can block over-budget requests, but it is not an automatically connected Agent Hook. Persisted policy scopes, verified Agent-native request interception, broader optimization experiments, additional Agent adapters, and Token-aware workflows remain planned capabilities. A Tokray-managed Bridge registration must not be presented as a connected vendor Hook until that integration is verified.
+
+## Current Focus
+
+Tokray has one active product goal: **make the existing Codex tool-output governance loop reliable and verifiable before adding any governance surface**.
+
+The loop is complete only when a user can:
+
+1. identify a costly tool result from session evidence;
+2. preview the Tokray Native transformation and its information-loss risk;
+3. explicitly connect and trust the Codex `PostToolUse` Hook, with a receipt and guarded rollback;
+4. verify the effective Codex trust state and dispatcher locally without a model call;
+5. compare later provider Usage and a task-quality signal against the baseline.
+
+Monitor remains the evidence foundation. The Request Governor remains an independent API and laboratory because Codex has no verified pre-model-request Hook; it is not part of the current Codex end-to-end claim.
+
+Until this loop is verified, additional Agent adapters, governance strategies, cross-session analytics, persisted team policy, model routing, workflow orchestration, self-hosted collection, and broader RTK integration are frozen. They may remain documented as future directions, but they are not parallel development tracks.
 
 ## Product Direction
 
@@ -35,14 +52,13 @@ observe   ->   set policy ->  simulate/verify -> move deterministic work out of 
 - **Optimize**: compression, trimming, caching, tool selection, and model-routing experiments with before/after evidence.
 - **Orchestrate**: focused Token-aware recipes in which scripts and APIs perform deterministic work and models retain semantic judgment.
 
-Tokray is not becoming a generic workflow builder. A feature belongs in the core product only when it directly improves context efficiency, Token governance, or the verification loop.
+These are sequential horizons, not simultaneous commitments. Tokray is currently finishing the first Monitor-to-Govern loop. It is not becoming a generic workflow builder. A feature belongs in the active scope only when it is necessary to complete or verify that loop.
 
 ## Users
 
-- Engineers using coding agents who need to diagnose context growth, tool overhead, cache behavior, and compaction.
-- Agent, Skill, and adapter developers who need compatibility tests and defensible Token attribution.
-- Multi-Agent teams that need project, role, Agent, and model cost baselines.
-- Platform teams that need self-hosted, privacy-preserving governance across developer machines.
+- **Primary now**: individual developers using Codex or Claude Code locally who need to find and safely reduce context waste in a real session.
+- **Secondary later**: Agent, Skill, and adapter developers who need compatibility tests and defensible Token attribution.
+- **Not current scope**: team policy administration and multi-machine platform operations.
 
 ## Primary User Outcomes
 

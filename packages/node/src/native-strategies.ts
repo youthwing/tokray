@@ -1,6 +1,7 @@
 import type { ActionExecutionTarget, GovernanceRisk } from '@tokray/core';
 
 export type NativeGovernanceSurface =
+  | 'model-request'
   | 'tool-output'
   | 'context-selection'
   | 'tool-schema'
@@ -22,6 +23,15 @@ export interface NativeGovernanceStrategy {
 }
 
 const strategies: readonly NativeGovernanceStrategy[] = [
+  {
+    id: 'request.govern',
+    surface: 'model-request',
+    maturity: 'available',
+    target: 'request-proxy',
+    risk: 'medium',
+    reversible: true,
+    evidence: ['original-request', 'governed-request', 'tool-contract', 'input-budget'],
+  },
   {
     id: 'output.filter',
     surface: 'tool-output',

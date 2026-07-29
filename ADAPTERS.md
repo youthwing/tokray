@@ -16,10 +16,12 @@ Agent and model provider are separate fields. An Agent may use several providers
 | Adapter | Agent/source | Logs | Exact Usage | Exact request | Compaction markers | Runtime controls |
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude-code` | Claude Code | full | full | partial | full | unknown until Hook integration |
-| `codex` | Codex | full | full | partial | full | unknown until Hook integration |
+| `codex` | Codex | full | full | partial | full | partial for documented local-tool lifecycle Hooks |
 | `raw-request` | OpenAI/Anthropic-compatible capture | full | partial | full | none | none |
 
 `partial` and `unknown` are first-class results. They must not be rendered as full support.
+
+Codex `PreToolUse` and `PostToolUse` cover Bash, `apply_patch`, MCP, and most local function tools, but not hosted tools or specialized paths that opt out. `PostToolUse` can replace a supported tool result with hook feedback, while direct `updatedMCPToolOutput` replacement is not supported. Tokray therefore declares `preToolHook` and `rewriteOutput` as `partial`, not `full`.
 
 ## Capability Matrix
 

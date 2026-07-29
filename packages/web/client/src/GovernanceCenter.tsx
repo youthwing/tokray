@@ -19,6 +19,7 @@ import { HookBridgePanel } from './HookBridgePanel';
 import { NativeEnginePanel } from './NativeEnginePanel';
 
 type ProposalFilter = 'all' | 'change' | 'manual' | 'inspect';
+type GovernanceWorkspace = 'findings' | 'controls' | 'connections';
 
 interface ActionCopy {
   title: string;
@@ -90,20 +91,25 @@ export function GovernanceCenter({
 }) {
   const { locale } = useI18n();
   const chinese = locale === 'zh-CN';
+  const [workspace, setWorkspace] = useState<GovernanceWorkspace>('findings');
   const [filter, setFilter] = useState<ProposalFilter>('all');
   const [selectedId, setSelectedId] = useState<string>();
   const copy = chinese ? {
-    eyebrow: 'M2 · GOVERN', title: '治理行动队列', description: '把诊断结果转换成有证据、执行位置和能力门槛的操作提案。默认只读，受支持动作可在批准后执行。',
+    title: 'Codex 治理链路收口', description: '当前目标：保证 Hook 配置稳定、状态可判定、本地自检可复现；真实 A/B 通过前不扩展治理能力。',
     readOnly: '默认只读保护', readOnlyDetail: '不会自动写入 Agent 配置或修改当前上下文。只有明确批准后，才会执行白名单实验或写入 Tokray 自管配置。',
+    workspace: '治理工作区', findingsWorkspace: '会话发现', controlsWorkspace: '手动预演', connectionsWorkspace: '自动治理', rtkOptional: 'RTK 可选方案', rtkOptionalDetail: '仅在需要比较外部命令改写时展开。Tokray Native 是当前默认路径。',
     findings: '治理发现', future: '影响未来调用', estimated: '预计可治理', bridges: '需要 Bridge',
+    warnings: '项警告', futureCalls: '后续调用', estimatedSaving: '估算节省', actionProvider: '执行入口', saving: '节省', waste: '浪费',
     all: '全部', change: '变更建议', manual: '手动执行', inspect: '仅检查', action: '建议动作', impact: 'Token 影响', target: '执行位置', status: '应用状态',
     noImpact: '待验证', evidence: '条证据', preview: '操作预览', safety: '安全边界', noWrites: '本次预览不写文件、不修改运行时', appliesFuture: '批准后的动作仅影响未来模型调用',
     capability: '能力门槛', noCapability: '由 Tokray 或外部执行器提供，不依赖 Agent 原生能力', plan: '执行计划', viewEvidence: '查看证据', unavailable: '暂不可应用',
     exact: '精确', inferred: '推断', guessed: '估算', method: '计量方法', risk: '风险', low: '低', medium: '中', high: '高',
   } : {
-    eyebrow: 'M2 · GOVERN', title: 'Governance action queue', description: 'Turn findings into evidence-linked proposals with an execution location and capability gate. Read-only by default; supported actions can run after approval.',
+    title: 'Codex governance reliability', description: 'Current goal: stable Hook config, authoritative status, and reproducible local self-tests. No new governance surfaces before a valid A/B.',
     readOnly: 'Read-only by default', readOnlyDetail: 'Tokray never changes Agent config or live context automatically. Only explicit approval can run an allowlisted experiment or write Tokray-managed config.',
+    workspace: 'Governance workspace', findingsWorkspace: 'Session findings', controlsWorkspace: 'Manual preview', connectionsWorkspace: 'Automatic governance', rtkOptional: 'Optional RTK path', rtkOptionalDetail: 'Expand only to compare external command rewriting. Tokray Native is the current default path.',
     findings: 'Governance findings', future: 'Affect future calls', estimated: 'Estimated governable', bridges: 'Need a Bridge',
+    warnings: 'warnings', futureCalls: 'future calls', estimatedSaving: 'estimated saving', actionProvider: 'action provider', saving: 'saving', waste: 'waste',
     all: 'All', change: 'Change proposals', manual: 'Manual', inspect: 'Inspect only', action: 'Proposed action', impact: 'Token impact', target: 'Execution location', status: 'Apply status',
     noImpact: 'To be verified', evidence: 'evidence refs', preview: 'Action preview', safety: 'Safety boundary', noWrites: 'This preview writes no files and changes no runtime state', appliesFuture: 'An approved action would affect future model calls only',
     capability: 'Capability gate', noCapability: 'Provided by Tokray or an external executor; no native Agent capability is assumed', plan: 'Execution plan', viewEvidence: 'View evidence', unavailable: 'Apply unavailable',
@@ -147,60 +153,72 @@ export function GovernanceCenter({
 
   return <div className="governance-center">
     <section className="governance-intro">
-      <div><span>{copy.eyebrow}</span><h2>{copy.title}</h2><p>{copy.description}</p></div>
+      <div><h2>{copy.title}</h2><p>{copy.description}</p></div>
       <div className="readonly-state"><LockKeyhole size={17} /><div><strong>{copy.readOnly}</strong><p>{copy.readOnlyDetail}</p></div></div>
     </section>
 
-    <section className="governance-metrics" aria-label={copy.title}>
-      <div><ShieldCheck size={16} /><span>{copy.findings}</span><strong>{report.actionProposals.length}</strong><small>{report.diagnosis.issueCount} warning+</small></div>
-      <div><FileClock size={16} /><span>{copy.future}</span><strong>{futureCount}</strong><small>future-calls</small></div>
-      <div><CircleGauge size={16} /><span>{copy.estimated}</span><strong>{estimatedSaving > 0 ? fmtTokens(estimatedSaving) : '—'}</strong><small>estimated saving</small></div>
-      <div><PlugZap size={16} /><span>{copy.bridges}</span><strong>{bridgeCount}</strong><small>action provider</small></div>
-    </section>
-
-    <NativeEnginePanel report={report} onNavigate={onNavigate} />
-
-    <RtkPanel />
-
-    <HookBridgePanel />
-
-    <div className="governance-filter" role="group" aria-label={copy.status}>
-      {filters.map(([id, label, count]) => <button key={id} className={filter === id ? 'active' : ''} onClick={() => setFilter(id)}><span>{label}</span><strong>{count}</strong></button>)}
+    <div className="governance-workspaces" role="group" aria-label={copy.workspace}>
+      <button type="button" className={workspace === 'findings' ? 'active' : ''} aria-pressed={workspace === 'findings'} onClick={() => setWorkspace('findings')}><ShieldCheck size={15} /><span>{copy.findingsWorkspace}</span><strong>{report.actionProposals.length}</strong></button>
+      <button type="button" className={workspace === 'controls' ? 'active' : ''} aria-pressed={workspace === 'controls'} onClick={() => setWorkspace('controls')}><CircleGauge size={15} /><span>{copy.controlsWorkspace}</span></button>
+      <button type="button" className={workspace === 'connections' ? 'active' : ''} aria-pressed={workspace === 'connections'} onClick={() => setWorkspace('connections')}><PlugZap size={15} /><span>{copy.connectionsWorkspace}</span></button>
     </div>
 
-    <section className="governance-table" aria-label={copy.title}>
-      <div className="governance-table-head"><span>{copy.action}</span><span>{copy.impact}</span><span>{copy.target}</span><span>{copy.status}</span><span /></div>
-      {filtered.map((proposal) => {
-        const text = actionCopy(proposal.action, chinese);
-        const target = targetCopy[proposal.execution.target];
-        const impact = impactValue(proposal);
-        return <button type="button" className={selected?.id === proposal.id ? 'governance-row selected' : 'governance-row'} key={proposal.id} onClick={() => setSelectedId(proposal.id)}>
-          <span className="governance-action-copy"><strong>{text.title}</strong><code>{proposal.findingRuleId}</code></span>
-          <span className="governance-impact"><strong>{impact !== undefined ? fmtTokens(impact) : '—'}</strong><small>{proposal.impact?.estimatedSavingTokens ? 'saving' : proposal.impact?.estimatedWasteTokens ? 'waste' : copy.noImpact}</small></span>
-          <span className="governance-target"><strong>{target[0]}</strong><small>{target[1]}</small></span>
-          <span className={`action-status status-${proposal.execution.availability}`}>{availabilityCopy[proposal.execution.availability]}</span>
-          <ChevronRight size={15} />
-        </button>;
-      })}
-    </section>
+    {workspace === 'findings' && <>
+      <section className="governance-metrics" aria-label={copy.title}>
+        <div><ShieldCheck size={16} /><span>{copy.findings}</span><strong>{report.actionProposals.length}</strong><small>{report.diagnosis.issueCount} {copy.warnings}</small></div>
+        <div><FileClock size={16} /><span>{copy.future}</span><strong>{futureCount}</strong><small>{copy.futureCalls}</small></div>
+        <div><CircleGauge size={16} /><span>{copy.estimated}</span><strong>{estimatedSaving > 0 ? fmtTokens(estimatedSaving) : '—'}</strong><small>{copy.estimatedSaving}</small></div>
+        <div><PlugZap size={16} /><span>{copy.bridges}</span><strong>{bridgeCount}</strong><small>{copy.actionProvider}</small></div>
+      </section>
 
-    {selected && <section className="action-preview" aria-live="polite">
-      <div className="action-preview-heading"><div><span>{copy.preview}</span><h3>{actionCopy(selected.action, chinese).title}</h3><p>{actionCopy(selected.action, chinese).detail}</p></div><span className={`action-status status-${selected.execution.availability}`}>{availabilityCopy[selected.execution.availability]}</span></div>
-      <div className="preview-route" aria-label={copy.plan}>
-        <div><Eye size={16} /><span>Evidence</span><strong>{selected.evidence.length} {copy.evidence}</strong></div><ArrowRight size={15} />
-        <div><Route size={16} /><span>{copy.target}</span><strong>{targetCopy[selected.execution.target][0]}</strong></div><ArrowRight size={15} />
-        <div><ShieldCheck size={16} /><span>{copy.status}</span><strong>{availabilityCopy[selected.execution.availability]}</strong></div>
+      <div className="governance-filter" role="group" aria-label={copy.status}>
+        {filters.map(([id, label, count]) => <button key={id} className={filter === id ? 'active' : ''} onClick={() => setFilter(id)}><span>{label}</span><strong>{count}</strong></button>)}
       </div>
-      <div className="preview-detail-grid">
-        <div><span>{copy.safety}</span><p><LockKeyhole size={14} />{copy.noWrites}</p><p><FileClock size={14} />{copy.appliesFuture}</p></div>
-        <div><span>{copy.capability}</span><p>{selected.execution.requiredCapability ? <><code>{selected.execution.requiredCapability}</code><strong className={`capability-${selected.execution.capabilitySupport}`}>{selected.execution.capabilitySupport}</strong></> : copy.noCapability}</p></div>
-        <div><span>{copy.impact}</span><p>{selected.impact?.estimatedSavingTokens ? <><strong>{fmtTokens(selected.impact.estimatedSavingTokens.value)}</strong><small>{copy.method}: {selected.impact.estimatedSavingTokens.method}</small></> : copy.noImpact}</p><p><small>{copy.risk}: {copy[selected.risk]}</small></p></div>
-      </div>
-      <div className="preview-plan"><span>{copy.plan}</span><ol>{actionCopy(selected.action, chinese).steps.map((step) => <li key={step}><CheckCircle2 size={15} /><span>{step}</span></li>)}</ol></div>
-      <div className="preview-actions">
-        <button type="button" className="secondary-command" disabled={!finding} onClick={() => finding && onNavigate(finding)}><Eye size={15} />{copy.viewEvidence}</button>
-        <button type="button" className="primary-command" disabled><PlugZap size={15} />{copy.unavailable}</button>
-      </div>
-    </section>}
+
+      <section className="governance-table" aria-label={copy.title}>
+        <div className="governance-table-head"><span>{copy.action}</span><span>{copy.impact}</span><span>{copy.target}</span><span>{copy.status}</span><span /></div>
+        {filtered.map((proposal) => {
+          const text = actionCopy(proposal.action, chinese);
+          const target = targetCopy[proposal.execution.target];
+          const impact = impactValue(proposal);
+          return <button type="button" className={selected?.id === proposal.id ? 'governance-row selected' : 'governance-row'} key={proposal.id} onClick={() => setSelectedId(proposal.id)}>
+            <span className="governance-action-copy"><strong>{text.title}</strong><code>{proposal.findingRuleId}</code></span>
+            <span className="governance-impact"><strong>{impact !== undefined ? fmtTokens(impact) : '—'}</strong><small>{proposal.impact?.estimatedSavingTokens ? copy.saving : proposal.impact?.estimatedWasteTokens ? copy.waste : copy.noImpact}</small></span>
+            <span className="governance-target"><strong>{target[0]}</strong><small>{target[1]}</small></span>
+            <span className={`action-status status-${proposal.execution.availability}`}>{availabilityCopy[proposal.execution.availability]}</span>
+            <ChevronRight size={15} />
+          </button>;
+        })}
+      </section>
+
+      {selected && <section className="action-preview" aria-live="polite">
+        <div className="action-preview-heading"><div><span>{copy.preview}</span><h3>{actionCopy(selected.action, chinese).title}</h3><p>{actionCopy(selected.action, chinese).detail}</p></div><span className={`action-status status-${selected.execution.availability}`}>{availabilityCopy[selected.execution.availability]}</span></div>
+        <div className="preview-route" aria-label={copy.plan}>
+          <div><Eye size={16} /><span>Evidence</span><strong>{selected.evidence.length} {copy.evidence}</strong></div><ArrowRight size={15} />
+          <div><Route size={16} /><span>{copy.target}</span><strong>{targetCopy[selected.execution.target][0]}</strong></div><ArrowRight size={15} />
+          <div><ShieldCheck size={16} /><span>{copy.status}</span><strong>{availabilityCopy[selected.execution.availability]}</strong></div>
+        </div>
+        <div className="preview-detail-grid">
+          <div><span>{copy.safety}</span><p><LockKeyhole size={14} />{copy.noWrites}</p><p><FileClock size={14} />{copy.appliesFuture}</p></div>
+          <div><span>{copy.capability}</span><p>{selected.execution.requiredCapability ? <><code>{selected.execution.requiredCapability}</code><strong className={`capability-${selected.execution.capabilitySupport}`}>{selected.execution.capabilitySupport}</strong></> : copy.noCapability}</p></div>
+          <div><span>{copy.impact}</span><p>{selected.impact?.estimatedSavingTokens ? <><strong>{fmtTokens(selected.impact.estimatedSavingTokens.value)}</strong><small>{copy.method}: {selected.impact.estimatedSavingTokens.method}</small></> : copy.noImpact}</p><p><small>{copy.risk}: {copy[selected.risk]}</small></p></div>
+        </div>
+        <div className="preview-plan"><span>{copy.plan}</span><ol>{actionCopy(selected.action, chinese).steps.map((step) => <li key={step}><CheckCircle2 size={15} /><span>{step}</span></li>)}</ol></div>
+        <div className="preview-actions">
+          <button type="button" className="secondary-command" disabled={!finding} onClick={() => finding && onNavigate(finding)}><Eye size={15} />{copy.viewEvidence}</button>
+          <button type="button" className="primary-command" disabled><PlugZap size={15} />{copy.unavailable}</button>
+        </div>
+      </section>}
+    </>}
+
+    {workspace === 'controls' && <NativeEnginePanel report={report} onNavigate={onNavigate} onOpenAutomation={() => setWorkspace('connections')} />}
+
+    {workspace === 'connections' && <>
+      <HookBridgePanel />
+      <details className="governance-secondary">
+        <summary><span><strong>{copy.rtkOptional}</strong><small>{copy.rtkOptionalDetail}</small></span><ChevronRight size={15} /></summary>
+        <RtkPanel />
+      </details>
+    </>}
   </div>;
 }

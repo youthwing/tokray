@@ -11,3 +11,7 @@ web-dist/
 coverage/
 .playwright-cli/
 output/playwright/
+
+# Generated local Codex integration and failed experiment transport trace.
+.codex/hooks.json
+experiments/codex-posttooluse-ab/baseline.events.jsonl

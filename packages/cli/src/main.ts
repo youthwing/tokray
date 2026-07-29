@@ -14,10 +14,25 @@ import { createReadStream } from 'node:fs';
 import { open, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildToolsReport, calibrationFor, residentBreakdown } from '@tokray/core';
 import type { Anomaly, ContextBlock, ContextFrame, TokenCount, ToolRosterDelta } from '@tokray/core';
 import { detectAdapter } from '@tokray/adapters';
 import { fmtTokens, renderFrame, renderLegend, renderSummary } from './ascii.js';
+
+function commandArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:\\-]+$/.test(value)) return value;
+  if (process.platform === 'win32') return `"${value.replaceAll('"', '\\"')}"`;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function cliCommandPrefix(): string {
+  return `${commandArgument(process.execPath)} ${commandArgument(fileURLToPath(import.meta.url))}`;
+}
+
+function nativeHookDispatcher(agent: string): string {
+  return `${cliCommandPrefix()} hook filter --agent ${agent} --profile auto`;
+}
 
 interface Args {
   file?: string;
@@ -36,7 +51,7 @@ function parseArgs(argv: string[]): Args {
     } else if (a === '--no-color') args.color = false;
     else if (a === '--tail') args.tail = Number(argv[++i]) || 60;
     else if (a === '--help' || a === '-h') {
-      console.log('usage: tokray [session.jsonl] [--json out.json] [--tail n] [--no-color]\n       tokray web [--port 4319]\n       tokray filter [--profile auto|generic|test|build|json|git-status] [--input file] [--command value] [--report-json]\n       tokray hook filter --agent <agent> [--profile auto|generic|test|build|json|git-status] [--command value] [--exit-code n]\n       tokray hook rewrite --agent <agent> --command "git status"');
+      console.log('usage: tokray [session.jsonl] [--json out.json] [--tail n] [--no-color]\n       tokray web [--port 4319]\n       tokray request govern [--input request.json] [--max-input-tokens n] [--allow-tools read_file,grep] [--report-json]\n       tokray filter [--profile auto|generic|test|build|json|git-status] [--input file] [--command value] [--report-json]\n       tokray hook filter --agent <agent> [--profile auto|generic|test|build|json|git-status] [--command value] [--exit-code n]\n       tokray hook connect --agent codex [--path .codex/hooks.json] [--apply --expected-after-hash sha256:...]\n       tokray hook status --agent codex [--path .codex/hooks.json]\n       tokray hook self-test --agent codex [--path .codex/hooks.json]\n       tokray hook rewrite --agent <agent> --command "git status"');
       process.exit(0);
     } else if (a !== undefined && !a.startsWith('-')) args.file = a;
   }
@@ -80,6 +95,56 @@ async function discoverNewestSession(): Promise<string | null> {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'request' && argv[1] === 'govern') {
+    const inputIndex = argv.indexOf('--input');
+    const budgetIndex = argv.indexOf('--max-input-tokens');
+    const allowToolsIndex = argv.indexOf('--allow-tools');
+    const inputPath = inputIndex >= 0 ? argv[inputIndex + 1] : undefined;
+    let source: string;
+    if (inputPath) {
+      source = await readFile(inputPath, 'utf8');
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      source = Buffer.concat(chunks).toString('utf8');
+    }
+    if (!source.trim()) {
+      console.error('tokray request govern requires JSON on stdin or --input <request.json>');
+      process.exit(2);
+    }
+    let input: unknown;
+    try {
+      input = JSON.parse(source);
+    } catch (error) {
+      console.error(`invalid request JSON: ${error instanceof Error ? error.message : 'parse failed'}`);
+      process.exit(2);
+    }
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      console.error('request JSON must be an object');
+      process.exit(2);
+    }
+    const maxInputTokens = budgetIndex >= 0 ? Number(argv[budgetIndex + 1]) : undefined;
+    if (maxInputTokens !== undefined && (!Number.isInteger(maxInputTokens) || maxInputTokens <= 0)) {
+      console.error('--max-input-tokens must be a positive integer');
+      process.exit(2);
+    }
+    const allowedTools = allowToolsIndex >= 0
+      ? (argv[allowToolsIndex + 1] ?? '').split(',').map((name) => name.trim()).filter(Boolean)
+      : undefined;
+    const { governNativeRequest } = await import('@tokray/node');
+    const result = governNativeRequest(input as Record<string, unknown>, {
+      ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+      ...(allowedTools !== undefined ? { allowedTools } : {}),
+      compactToolDescriptions: !argv.includes('--no-compact-descriptions'),
+      deduplicateTools: !argv.includes('--keep-duplicate-tools'),
+    });
+    process.stdout.write(`${JSON.stringify(argv.includes('--report-json') ? result : result.request, null, 2)}\n`);
+    if (!result.budget.sendAllowed) {
+      console.error(`request blocked: estimated ${result.governed.estimatedTokens.value} input Tokens exceeds budget ${result.budget.maxInputTokens}`);
+      process.exitCode = 3;
+    }
+    return;
+  }
   if (argv[0] === 'filter') {
     const profileIndex = argv.indexOf('--profile');
     const commandIndex = argv.indexOf('--command');
@@ -132,6 +197,63 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(result));
     return;
   }
+  if (argv[0] === 'hook' && argv[1] === 'connect') {
+    const agentIndex = argv.indexOf('--agent');
+    const pathIndex = argv.indexOf('--path');
+    const hashIndex = argv.indexOf('--expected-after-hash');
+    const agent = argv[agentIndex + 1];
+    const hooksPath = pathIndex >= 0 ? argv[pathIndex + 1] : undefined;
+    if (agent !== 'codex') {
+      console.error('usage: tokray hook connect --agent codex [--path .codex/hooks.json] [--apply --expected-after-hash sha256:...]');
+      process.exit(2);
+    }
+    const node = await import('@tokray/node');
+    if (argv.includes('--apply')) {
+      const expectedAfterHash = hashIndex >= 0 ? argv[hashIndex + 1] : undefined;
+      if (!expectedAfterHash) {
+        console.error('--apply requires --expected-after-hash from a fresh preview');
+        process.exit(2);
+      }
+      const result = await node.applyCodexHookConnection({ approved: true, expectedAfterHash }, {
+        ...(hooksPath ? { codexHooksPath: hooksPath } : {}),
+        dispatcherCommand: nativeHookDispatcher('codex'),
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    const preview = await node.previewCodexHookConnection({
+      ...(hooksPath ? { codexHooksPath: hooksPath } : {}),
+      dispatcherCommand: nativeHookDispatcher('codex'),
+    });
+    console.log(JSON.stringify(preview, null, 2));
+    if (preview.status !== 'ready') process.exitCode = 3;
+    return;
+  }
+  if (argv[0] === 'hook' && (argv[1] === 'status' || argv[1] === 'self-test')) {
+    const agentIndex = argv.indexOf('--agent');
+    const pathIndex = argv.indexOf('--path');
+    const agent = argv[agentIndex + 1];
+    const hooksPath = pathIndex >= 0 ? argv[pathIndex + 1] : undefined;
+    if (agent !== 'codex') {
+      console.error(`usage: tokray hook ${argv[1]} --agent codex [--path .codex/hooks.json]`);
+      process.exit(2);
+    }
+    const node = await import('@tokray/node');
+    const options = {
+      ...(hooksPath ? { codexHooksPath: hooksPath } : {}),
+      dispatcherCommand: nativeHookDispatcher('codex'),
+    };
+    if (argv[1] === 'status') {
+      const result = await node.inspectCodexHookRuntime(options);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.state !== 'active') process.exitCode = 3;
+    } else {
+      const result = await node.selfTestCodexHook(options);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== 'passed') process.exitCode = 3;
+    }
+    return;
+  }
   if (argv[0] === 'hook' && argv[1] === 'filter') {
     const agentIndex = argv.indexOf('--agent');
     const profileIndex = argv.indexOf('--profile');
@@ -149,8 +271,26 @@ async function main(): Promise<void> {
     for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     const input = Buffer.concat(chunks).toString('utf8');
     const parsedExitCode = exitCodeIndex >= 0 ? Number(argv[exitCodeIndex + 1]) : undefined;
-    const { dispatchHookFilter } = await import('@tokray/node');
-    const result = await dispatchHookFilter(
+    const node = await import('@tokray/node');
+    if (agent === 'codex') {
+      let hookInput: unknown;
+      try {
+        hookInput = JSON.parse(input);
+      } catch {
+        hookInput = undefined;
+      }
+      if (hookInput !== null && typeof hookInput === 'object' && !Array.isArray(hookInput)
+        && 'hook_event_name' in hookInput) {
+        const result = await node.dispatchCodexPostToolUse(hookInput, {
+          profile: profile as (typeof profiles)[number],
+          ...(commandIndex >= 0 && argv[commandIndex + 1] ? { command: argv[commandIndex + 1] } : {}),
+          ...(parsedExitCode !== undefined && Number.isInteger(parsedExitCode) ? { exitCode: parsedExitCode } : {}),
+        });
+        if (result.hookOutput) process.stdout.write(`${JSON.stringify(result.hookOutput)}\n`);
+        return;
+      }
+    }
+    const result = await node.dispatchHookFilter(
       agent as 'claude-code' | 'codex' | 'codebuddy' | 'trae',
       input,
       {
@@ -167,7 +307,7 @@ async function main(): Promise<void> {
     const requestedPort = portIndex >= 0 ? Number(argv[portIndex + 1]) : 4319;
     const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535 ? requestedPort : 4319;
     const { startWebServer } = await import('@tokray/web/server');
-    startWebServer({ port });
+    startWebServer({ port, hookCommandPrefix: cliCommandPrefix() });
     console.log(`Tokray web listening on http://127.0.0.1:${port}`);
     return;
   }

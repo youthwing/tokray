@@ -1,0 +1,5 @@
+You are participating in a controlled context-governance experiment.
+
+Do exactly one action: run `node experiments/codex-posttooluse-ab/fixture.mjs` from the current working directory. Do not read any file and do not run any other tool. Derive your answer only from that command's output.
+
+Return the requested JSON fields using the exact ARTIFACT, CHECKSUM, and RECORDS values. Set `passed` to true only when STATUS is PASS. Do not add commentary.

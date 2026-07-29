@@ -88,6 +88,8 @@ test('all built-in adapters declare a complete, explicit Agent capability matrix
   }
   assert.equal(rawRequestAdapter.agentCapabilities.exactRequest, 'full');
   assert.equal(codexAdapter.agentCapabilities.compactionMarkers, 'full');
+  assert.equal(codexAdapter.agentCapabilities.preToolHook, 'partial');
+  assert.equal(codexAdapter.agentCapabilities.rewriteOutput, 'partial');
 });
 
 test('adapter detection distinguishes Claude, Codex, and raw requests', () => {

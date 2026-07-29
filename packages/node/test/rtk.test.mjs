@@ -1,20 +1,25 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
   applyHookBridge,
+  applyCodexHookConnection,
+  dispatchCodexPostToolUse,
   dispatchHookFilter,
   dispatchHookRewrite,
   importRtkGain,
+  inspectCodexHookRuntime,
   inspectRtk,
   inspectRtkCommandSafety,
   listActionReceipts,
   previewHookBridge,
+  previewCodexHookConnection,
   previewRtkRewrite,
   rollbackHookBridge,
   runApprovedRtkComparison,
+  selfTestCodexHook,
 } from '../dist/index.js';
 
 async function fakeRtk() {
@@ -33,6 +38,51 @@ case "$1" in
   *) exit 2 ;;
 esac
 `, 'utf8');
+  await chmod(executable, 0o755);
+  return executable;
+}
+
+async function fakeCodexAppServer() {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-codex-app-server-'));
+  const executable = join(directory, 'codex');
+  await writeFile(executable, `#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  for (;;) {
+    const newline = input.indexOf('\\n');
+    if (newline < 0) break;
+    const line = input.slice(0, newline);
+    input = input.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.id === 0) process.stdout.write(JSON.stringify({ id: 0, result: { codexHome: '/tmp/fake' } }) + '\\n');
+    if (message.id !== 1) continue;
+    const cwd = message.params.cwds[0];
+    const path = join(cwd, '.codex', 'hooks.json');
+    const config = JSON.parse(readFileSync(path, 'utf8'));
+    const handler = config.hooks.PostToolUse[0].hooks[0];
+    process.stdout.write(JSON.stringify({ id: 1, result: { data: [{
+      cwd,
+      hooks: [{
+        key: path + ':post_tool_use:0:0',
+        eventName: 'postToolUse',
+        handlerType: 'command',
+        command: handler.command,
+        sourcePath: path,
+        enabled: process.env.FAKE_CODEX_HOOK_ENABLED !== 'false',
+        currentHash: 'sha256:current',
+        trustStatus: process.env.FAKE_CODEX_TRUST_STATUS || 'trusted'
+      }],
+      warnings: [],
+      errors: []
+    }] } }) + '\\n');
+  }
+});
+`);
   await chmod(executable, 0o755);
   return executable;
 }
@@ -187,6 +237,238 @@ test('Tokray Native Hook Bridge is built in, filters output, and remains reversi
 
   const rollback = await rollbackHookBridge(applied.receipt.id, { approved: true }, { configPath, path: receiptPath });
   assert.equal(rollback.status, 'rolled-back');
+});
+
+test('Hook Bridge preview updates a registered dispatcher when the executable command changes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-hook-dispatcher-'));
+  const configPath = join(directory, 'hook-bridges.json');
+  await writeFile(configPath, `${JSON.stringify({
+    version: 1,
+    bridges: [{
+      id: 'tokray-output-codex',
+      agent: 'codex',
+      enabled: true,
+      provider: 'tokray-native',
+      intercept: 'tool-output',
+      activation: 'registered-not-connected',
+      dispatcherCommand: 'tokray hook filter --agent codex --profile auto',
+      registeredAt: '2026-07-28T08:00:00.000Z',
+    }],
+  })}\n`);
+
+  const dispatcherCommand = '/opt/node /workspace/tokray/dist/main.js hook filter --agent codex --profile auto';
+  const preview = await previewHookBridge('codex', { configPath, dispatcherCommand });
+  assert.equal(preview.status, 'ready');
+  assert.equal(preview.operation, 'update');
+  assert.equal(preview.bridge.dispatcherCommand, dispatcherCommand);
+});
+
+test('Codex PostToolUse adapter filters documented textual response shapes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-codex-hook-'));
+  const configPath = join(directory, 'hook-bridges.json');
+  await writeFile(configPath, `${JSON.stringify({
+    version: 1,
+    bridges: [{
+      id: 'tokray-output-codex',
+      agent: 'codex',
+      enabled: true,
+      provider: 'tokray-native',
+      intercept: 'tool-output',
+      activation: 'registered-not-connected',
+      dispatcherCommand: 'tokray hook filter --agent codex --profile auto',
+      registeredAt: '2026-07-28T08:00:00.000Z',
+    }],
+  })}\n`);
+  const repeated = 'waiting for incremental build to finish before retrying';
+  const toolResponse = Array.from({ length: 10 }, () => repeated).join('\n');
+  const result = await dispatchCodexPostToolUse({
+    session_id: 'session-1',
+    turn_id: 'turn-1',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    tool_use_id: 'tool-1',
+    tool_input: { command: 'pnpm test' },
+    tool_response: toolResponse,
+  }, { profile: 'generic' }, { configPath });
+
+  assert.equal(result.status, 'filtered');
+  assert.equal(result.hookOutput?.continue, false);
+  assert.match(result.hookOutput?.stopReason ?? '', /repeated previous line 9 more times/);
+  assert.equal(result.filter?.command, 'pnpm test');
+
+  const structured = await dispatchCodexPostToolUse({
+    hook_event_name: 'PostToolUse',
+    tool_input: { cmd: 'pnpm test' },
+    tool_response: {
+      exit_code: 0,
+      wall_time_seconds: 0.25,
+      original_token_count: 1234,
+      output: toolResponse,
+    },
+  }, { profile: 'generic' }, { configPath });
+  assert.equal(structured.status, 'filtered');
+  assert.match(structured.hookOutput?.stopReason ?? '', /exit_code=0/);
+  assert.match(structured.hookOutput?.stopReason ?? '', /repeated previous line 9 more times/);
+  assert.equal(structured.filter?.command, 'pnpm test');
+
+  const contentBlocks = await dispatchCodexPostToolUse({
+    hook_event_name: 'PostToolUse',
+    tool_response: { content: [{ type: 'input_text', text: toolResponse }] },
+  }, { profile: 'generic' }, { configPath });
+  assert.equal(contentBlocks.status, 'filtered');
+  assert.match(contentBlocks.hookOutput?.stopReason ?? '', /repeated previous line 9 more times/);
+
+  const unsupported = await dispatchCodexPostToolUse({
+    hook_event_name: 'PostToolUse',
+    tool_response: { content: [{ type: 'image', data: 'base64-data' }] },
+  }, { profile: 'generic' }, { configPath });
+  assert.deepEqual(unsupported, { status: 'passthrough', reason: 'unsupported-codex-tool-response' });
+
+  const unregistered = await dispatchCodexPostToolUse({
+    hook_event_name: 'PostToolUse',
+    tool_input: { command: 'pnpm test' },
+    tool_response: toolResponse,
+  }, { profile: 'generic' }, { configPath: join(directory, 'missing.json') });
+  assert.deepEqual(unregistered, { status: 'passthrough', reason: 'bridge-not-registered' });
+});
+
+test('Codex Hook connection merges existing Agent config with approval, receipt, and guarded rollback', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-codex-connect-'));
+  const configPath = join(directory, 'hook-bridges.json');
+  const codexHooksPath = join(directory, '.codex', 'hooks.json');
+  const receiptPath = join(directory, 'receipts.jsonl');
+  await mkdir(join(directory, '.codex'), { recursive: true });
+  await writeFile(codexHooksPath, `${JSON.stringify({
+    description: 'Keep this metadata',
+    hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: 'echo existing' }] }],
+    },
+  }, null, 2)}\n`);
+
+  const bridgePreview = await previewHookBridge('codex', { configPath, path: receiptPath });
+  await applyHookBridge('codex', {
+    approved: true,
+    expectedAfterHash: bridgePreview.afterHash,
+    registeredAt: bridgePreview.bridge.registeredAt,
+  }, { configPath, path: receiptPath });
+
+  const preview = await previewCodexHookConnection({ configPath, codexHooksPath, path: receiptPath });
+  assert.equal(preview.status, 'ready');
+  assert.equal(preview.operation, 'update');
+  assert.equal(preview.writesAgentConfig, true);
+  assert.equal(preview.requiresCodexTrust, true);
+
+  const applied = await applyCodexHookConnection({
+    approved: true,
+    expectedAfterHash: preview.afterHash,
+  }, { configPath, codexHooksPath, path: receiptPath });
+  const connected = JSON.parse(await readFile(codexHooksPath, 'utf8'));
+  assert.equal(connected.description, 'Keep this metadata');
+  assert.equal(connected.hooks.SessionStart[0].hooks[0].command, 'echo existing');
+  assert.equal(connected.hooks.PostToolUse[0].matcher, '*');
+  assert.equal(
+    connected.hooks.PostToolUse[0].hooks[0].command,
+    'tokray hook filter --agent codex --profile auto',
+  );
+  assert.equal(applied.receipt.action, 'connect-codex-post-tool-hook');
+  assert.equal(applied.receipt.result?.requiresCodexTrust, true);
+
+  const rollback = await rollbackHookBridge(applied.receipt.id, { approved: true }, {
+    configPath,
+    codexHooksPath,
+    path: receiptPath,
+  });
+  assert.equal(rollback.status, 'rolled-back');
+  const restored = JSON.parse(await readFile(codexHooksPath, 'utf8'));
+  assert.equal(restored.description, 'Keep this metadata');
+  assert.equal(restored.hooks.PostToolUse, undefined);
+});
+
+test('Codex Hook connection replaces stale Tokray handlers once and then remains byte-stable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-codex-idempotent-'));
+  const configPath = join(directory, 'hook-bridges.json');
+  const codexHooksPath = join(directory, '.codex', 'hooks.json');
+  const receiptPath = join(directory, 'receipts.jsonl');
+  const dispatcherCommand = '/opt/node /workspace/tokray.js hook filter --agent codex --profile auto';
+  await mkdir(join(directory, '.codex'), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({
+    version: 1,
+    bridges: [{
+      id: 'tokray-output-codex', agent: 'codex', enabled: true, provider: 'tokray-native',
+      intercept: 'tool-output', activation: 'registered-not-connected', dispatcherCommand,
+      registeredAt: '2026-07-28T08:00:00.000Z',
+    }],
+  })}\n`);
+  await writeFile(codexHooksPath, `${JSON.stringify({
+    hooks: {
+      PostToolUse: [
+        { matcher: 'Bash', hooks: [
+          { type: 'command', command: 'echo user-hook' },
+          { type: 'command', command: 'old-tokray hook filter --agent codex', statusMessage: 'Filtering tool output with Tokray' },
+        ] },
+        { matcher: '*', hooks: [
+          { type: 'command', command: 'duplicate-tokray hook filter --agent codex', statusMessage: 'Filtering tool output with Tokray' },
+        ] },
+      ],
+    },
+  }, null, 2)}\n`);
+
+  const preview = await previewCodexHookConnection({ configPath, codexHooksPath, path: receiptPath, dispatcherCommand });
+  assert.equal(preview.operation, 'update');
+  await applyCodexHookConnection({ approved: true, expectedAfterHash: preview.afterHash }, {
+    configPath, codexHooksPath, path: receiptPath, dispatcherCommand,
+  });
+  const content = await readFile(codexHooksPath, 'utf8');
+  const connected = JSON.parse(content);
+  const handlers = connected.hooks.PostToolUse.flatMap((group) => group.hooks);
+  assert.equal(handlers.filter((handler) => handler.statusMessage === 'Filtering tool output with Tokray').length, 1);
+  assert.equal(handlers.filter((handler) => handler.command === 'echo user-hook').length, 1);
+  assert.equal(handlers.find((handler) => handler.statusMessage === 'Filtering tool output with Tokray').command, dispatcherCommand);
+
+  const repeated = await previewCodexHookConnection({ configPath, codexHooksPath, path: receiptPath, dispatcherCommand });
+  assert.equal(repeated.operation, 'unchanged');
+  assert.equal(await readFile(codexHooksPath, 'utf8'), content);
+});
+
+test('Codex Hook runtime maps official trust states and runs a zero-model local self-test', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokray-codex-runtime-'));
+  const configPath = join(directory, 'hook-bridges.json');
+  const codexHooksPath = join(directory, '.codex', 'hooks.json');
+  const dispatcherCommand = 'tokray hook filter --agent codex --profile auto';
+  const codexExecutable = await fakeCodexAppServer();
+  await mkdir(join(directory, '.codex'), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({
+    version: 1,
+    bridges: [{
+      id: 'tokray-output-codex', agent: 'codex', enabled: true, provider: 'tokray-native',
+      intercept: 'tool-output', activation: 'registered-not-connected', dispatcherCommand,
+      registeredAt: '2026-07-28T08:00:00.000Z',
+    }],
+  })}\n`);
+  await writeFile(codexHooksPath, `${JSON.stringify({ hooks: { PostToolUse: [{
+    matcher: '*',
+    hooks: [{
+      type: 'command', command: dispatcherCommand, timeout: 30,
+      statusMessage: 'Filtering tool output with Tokray',
+    }],
+  }] } }, null, 2)}\n`);
+  const options = { cwd: directory, configPath, codexHooksPath, dispatcherCommand, codexExecutable };
+
+  const active = await inspectCodexHookRuntime(options);
+  assert.equal(active.state, 'active');
+  assert.equal(active.trustStatus, 'trusted');
+
+  const pending = await inspectCodexHookRuntime({ ...options, env: { FAKE_CODEX_TRUST_STATUS: 'untrusted' } });
+  assert.equal(pending.state, 'pending-trust');
+
+  const invalid = await inspectCodexHookRuntime({ ...options, env: { FAKE_CODEX_TRUST_STATUS: 'modified' } });
+  assert.equal(invalid.state, 'invalid');
+
+  const selfTest = await selfTestCodexHook(options);
+  assert.equal(selfTest.status, 'passed');
+  assert.equal(selfTest.modelCalls, 0);
+  assert.equal(selfTest.checks.markersPreserved, true);
+  assert.ok(selfTest.outputBytes < selfTest.inputBytes);
 });
 
 test('Tokray Native Hook filter fails open when output exceeds the transform limit', async () => {

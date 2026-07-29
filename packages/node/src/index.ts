@@ -4,14 +4,20 @@ export { buildActionProposals } from './actions.js';
 export { runApprovedRtkComparison } from './execution.js';
 export {
   applyHookBridge,
+  applyCodexHookConnection,
+  dispatchCodexPostToolUse,
   dispatchHookFilter,
   dispatchHookRewrite,
+  inspectCodexHookRuntime,
   inspectHookBridges,
+  previewCodexHookConnection,
   previewHookBridge,
   rollbackHookBridge,
+  selfTestCodexHook,
 } from './hook-bridges.js';
 export { createActionReceipt, defaultActionReceiptPath, listActionReceipts } from './receipts.js';
 export { filterNativeOutput } from './native-filter.js';
+export { governNativeRequest } from './request-governor.js';
 export { nativeGovernanceStrategies } from './native-strategies.js';
 export {
   compareRtkOutput,
@@ -55,6 +61,14 @@ export type {
   ActionReceipt,
 } from '@tokray/core';
 export type {
+  CodexHookConnectionApplyResult,
+  CodexHookConnectionPreview,
+  CodexHookActivationState,
+  CodexHookRuntimeStatus,
+  CodexHookSelfTestResult,
+  CodexHookTrustStatus,
+  CodexPostToolUseOutput,
+  CodexPostToolUseResult,
   HookBridgeAgent,
   HookBridgeApplyResult,
   HookBridgeDefinition,
@@ -74,6 +88,15 @@ export type {
   NativeFilterResult,
   ResolvedNativeFilterProfile,
 } from './native-filter.js';
+export type {
+  NativeRequestBudgetStatus,
+  NativeRequestDecision,
+  NativeRequestEstimate,
+  NativeRequestGovernanceOptions,
+  NativeRequestGovernanceResult,
+  NativeRequestMetrics,
+  NativeRequestProvider,
+} from './request-governor.js';
 export type {
   NativeGovernanceStrategy,
   NativeGovernanceSurface,

@@ -69,6 +69,7 @@ test('native generic truncation keeps diagnostic windows, head, and tail', () =>
 
 test('native strategy registry separates shipped transforms from diagnosis and planned surfaces', () => {
   const strategies = nativeGovernanceStrategies();
+  assert.equal(strategies.find((item) => item.id === 'request.govern')?.maturity, 'available');
   assert.equal(strategies.find((item) => item.id === 'output.filter')?.maturity, 'available');
   assert.equal(strategies.find((item) => item.id === 'context.deduplicate')?.maturity, 'diagnose');
   assert.equal(strategies.find((item) => item.id === 'context.progressive-disclosure')?.maturity, 'planned');
