@@ -18,6 +18,7 @@ export {
 export { createActionReceipt, defaultActionReceiptPath, listActionReceipts } from './receipts.js';
 export { filterNativeOutput } from './native-filter.js';
 export { governNativeRequest } from './request-governor.js';
+export { startModelGateway } from './model-gateway.js';
 export { nativeGovernanceStrategies } from './native-strategies.js';
 export {
   compareRtkOutput,
@@ -97,6 +98,13 @@ export type {
   NativeRequestMetrics,
   NativeRequestProvider,
 } from './request-governor.js';
+export type {
+  ModelGateway,
+  ModelGatewayEvent,
+  ModelGatewayGovernanceSummary,
+  ModelGatewayOptions,
+  ModelGatewayStats,
+} from './model-gateway.js';
 export type {
   NativeGovernanceStrategy,
   NativeGovernanceSurface,

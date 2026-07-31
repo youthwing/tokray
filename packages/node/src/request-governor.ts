@@ -1,4 +1,6 @@
 import { estimateTokens } from '@tokray/core';
+import { filterNativeOutput } from './native-filter.js';
+import type { NativeFilterLossRisk, NativeFilterProfile } from './native-filter.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -10,6 +12,9 @@ export interface NativeRequestGovernanceOptions {
   allowedTools?: readonly string[];
   compactToolDescriptions?: boolean;
   deduplicateTools?: boolean;
+  compactToolResults?: boolean;
+  toolResultMinChars?: number;
+  toolResultProfile?: NativeFilterProfile;
 }
 
 export interface NativeRequestEstimate {
@@ -29,6 +34,7 @@ export interface NativeRequestMetrics {
 export interface NativeRequestDecision {
   id:
     | 'compact-tool-descriptions'
+    | 'compact-tool-results'
     | 'deduplicate-exact-tool-schemas'
     | 'apply-explicit-tool-allowlist'
     | 'enforce-input-budget';
@@ -60,8 +66,18 @@ export interface NativeRequestGovernanceResult {
     allowlistRemoved: readonly string[];
     unnamedRetained: number;
   };
+  toolResults: {
+    inspected: number;
+    compacted: number;
+    originalBytes: number;
+    governedBytes: number;
+    estimatedSavedTokens: number;
+    highestLossRisk: NativeFilterLossRisk;
+  };
   integrity: {
-    messageContentPreserved: true;
+    messageContentPreserved: boolean;
+    nonToolMessageContentPreserved: true;
+    toolResultContractsPreserved: true;
     retainedToolContractsPreserved: true;
     originalInputUnmodified: true;
   };
@@ -212,6 +228,102 @@ function preservedMessageFields(request: JsonObject): string {
   });
 }
 
+interface ToolResultCompaction {
+  inspected: number;
+  compacted: number;
+  originalBytes: number;
+  governedBytes: number;
+  estimatedSavedTokens: number;
+  highestLossRisk: NativeFilterLossRisk;
+}
+
+function riskRank(risk: NativeFilterLossRisk): number {
+  return risk === 'medium' ? 2 : risk === 'low' ? 1 : 0;
+}
+
+function compactToolResultText(
+  value: string,
+  options: Required<Pick<NativeRequestGovernanceOptions, 'toolResultMinChars' | 'toolResultProfile'>>,
+  result: ToolResultCompaction,
+): string {
+  result.inspected++;
+  const originalBytes = Buffer.byteLength(value, 'utf8');
+  result.originalBytes += originalBytes;
+  if (value.length < options.toolResultMinChars) {
+    result.governedBytes += originalBytes;
+    return value;
+  }
+  const filtered = filterNativeOutput(value, { profile: options.toolResultProfile });
+  const compactBytes = Buffer.byteLength(filtered.output, 'utf8');
+  if (!filtered.changed || compactBytes >= originalBytes) {
+    result.governedBytes += originalBytes;
+    return value;
+  }
+  result.compacted++;
+  result.governedBytes += compactBytes;
+  result.estimatedSavedTokens += filtered.estimatedSavedTokens;
+  if (riskRank(filtered.lossRisk) > riskRank(result.highestLossRisk)) result.highestLossRisk = filtered.lossRisk;
+  return filtered.output;
+}
+
+function compactTextBlocks(
+  value: unknown,
+  options: Required<Pick<NativeRequestGovernanceOptions, 'toolResultMinChars' | 'toolResultProfile'>>,
+  result: ToolResultCompaction,
+): unknown {
+  if (typeof value === 'string') return compactToolResultText(value, options, result);
+  if (!Array.isArray(value)) return value;
+  return value.map((block) => {
+    if (typeof block === 'string') return compactToolResultText(block, options, result);
+    const item = object(block);
+    if (!item || typeof item['text'] !== 'string') return block;
+    const type = item['type'];
+    if (type !== undefined && type !== 'text' && type !== 'input_text' && type !== 'output_text') return block;
+    return { ...item, text: compactToolResultText(item['text'], options, result) };
+  });
+}
+
+/** Mutates only documented model-facing tool-result text shapes on an already-cloned request. */
+function compactToolResults(
+  request: JsonObject,
+  options: Required<Pick<NativeRequestGovernanceOptions, 'toolResultMinChars' | 'toolResultProfile'>>,
+): ToolResultCompaction {
+  const result: ToolResultCompaction = {
+    inspected: 0,
+    compacted: 0,
+    originalBytes: 0,
+    governedBytes: 0,
+    estimatedSavedTokens: 0,
+    highestLossRisk: 'none',
+  };
+  const messages = request['messages'];
+  if (Array.isArray(messages)) {
+    for (const message of messages) {
+      const item = object(message);
+      if (!item) continue;
+      if (item['role'] === 'tool') {
+        item['content'] = compactTextBlocks(item['content'], options, result);
+        continue;
+      }
+      if (!Array.isArray(item['content'])) continue;
+      item['content'] = item['content'].map((block) => {
+        const content = object(block);
+        if (!content || content['type'] !== 'tool_result') return block;
+        return { ...content, content: compactTextBlocks(content['content'], options, result) };
+      });
+    }
+  }
+  const input = request['input'];
+  if (Array.isArray(input)) {
+    request['input'] = input.map((entry) => {
+      const item = object(entry);
+      if (!item || item['type'] !== 'function_call_output') return entry;
+      return { ...item, output: compactTextBlocks(item['output'], options, result) };
+    });
+  }
+  return result;
+}
+
 export function governNativeRequest(
   input: JsonObject,
   options: NativeRequestGovernanceOptions = {},
@@ -221,6 +333,10 @@ export function governNativeRequest(
   if (options.maxInputTokens !== undefined
     && (!Number.isInteger(options.maxInputTokens) || options.maxInputTokens <= 0)) {
     throw new Error('maxInputTokens must be a positive integer');
+  }
+  if (options.toolResultMinChars !== undefined
+    && (!Number.isInteger(options.toolResultMinChars) || options.toolResultMinChars <= 0)) {
+    throw new Error('toolResultMinChars must be a positive integer');
   }
 
   const originalRoot = input;
@@ -270,7 +386,25 @@ export function governNativeRequest(
   }
   if (Array.isArray(governedRequest['tools'])) governedRequest['tools'] = nextTools;
 
-  if (preservedMessageFields(originalRequest) !== preservedMessageFields(governedRequest)) {
+  const toolResultOptions = {
+    toolResultMinChars: options.toolResultMinChars ?? 2_000,
+    toolResultProfile: options.toolResultProfile ?? 'auto',
+  };
+  const toolResults = options.compactToolResults === true
+    ? compactToolResults(governedRequest, toolResultOptions)
+    : {
+      inspected: 0,
+      compacted: 0,
+      originalBytes: 0,
+      governedBytes: 0,
+      estimatedSavedTokens: 0,
+      highestLossRisk: 'none' as const,
+    };
+
+  const expectedMessages = object(cloneJson(originalRequest));
+  if (!expectedMessages) throw new Error('Request must be a JSON object');
+  if (options.compactToolResults === true) compactToolResults(expectedMessages, toolResultOptions);
+  if (preservedMessageFields(expectedMessages) !== preservedMessageFields(governedRequest)) {
     throw new Error('Message content changed during request governance');
   }
 
@@ -291,6 +425,9 @@ export function governNativeRequest(
       affectedFields: descriptionFieldsCompacted,
     });
   }
+  if (toolResults.compacted > 0) {
+    decisions.push({ id: 'compact-tool-results', affectedTools: toolResults.compacted, affectedFields: toolResults.compacted });
+  }
   if (exactDuplicatesRemoved > 0) {
     decisions.push({ id: 'deduplicate-exact-tool-schemas', affectedTools: exactDuplicatesRemoved, affectedFields: 0 });
   }
@@ -303,6 +440,7 @@ export function governNativeRequest(
   const warnings: string[] = ['token-budget-uses-char-class-estimate'];
   if (unnamedRetained > 0) warnings.push('unnamed-tools-retained-outside-allowlist');
   if (budgetStatus === 'over-budget') warnings.push('request-blocked-by-estimated-input-budget');
+  if (toolResults.highestLossRisk !== 'none') warnings.push('tool-result-content-compacted-with-information-loss-risk');
 
   return {
     provider: 'tokray-native',
@@ -330,8 +468,11 @@ export function governNativeRequest(
       allowlistRemoved,
       unnamedRetained,
     },
+    toolResults,
     integrity: {
-      messageContentPreserved: true,
+      messageContentPreserved: toolResults.compacted === 0,
+      nonToolMessageContentPreserved: true,
+      toolResultContractsPreserved: true,
       retainedToolContractsPreserved: true,
       originalInputUnmodified: true,
     },

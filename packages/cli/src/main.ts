@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): Args {
     } else if (a === '--no-color') args.color = false;
     else if (a === '--tail') args.tail = Number(argv[++i]) || 60;
     else if (a === '--help' || a === '-h') {
-      console.log('usage: tokray [session.jsonl] [--json out.json] [--tail n] [--no-color]\n       tokray web [--port 4319]\n       tokray request govern [--input request.json] [--max-input-tokens n] [--allow-tools read_file,grep] [--report-json]\n       tokray filter [--profile auto|generic|test|build|json|git-status] [--input file] [--command value] [--report-json]\n       tokray hook filter --agent <agent> [--profile auto|generic|test|build|json|git-status] [--command value] [--exit-code n]\n       tokray hook connect --agent codex [--path .codex/hooks.json] [--apply --expected-after-hash sha256:...]\n       tokray hook status --agent codex [--path .codex/hooks.json]\n       tokray hook self-test --agent codex [--path .codex/hooks.json]\n       tokray hook rewrite --agent <agent> --command "git status"');
+      console.log('usage: tokray [session.jsonl] [--json out.json] [--tail n] [--no-color]\n       tokray web [--port 4319]\n       tokray gateway --upstream <url> [--port 4318] [--host 127.0.0.1] [--max-input-tokens n] [--allow-tools names] [--compact-tool-results] [--tool-result-min-chars n]\n       tokray request govern [--input request.json] [--max-input-tokens n] [--allow-tools read_file,grep] [--report-json]\n       tokray filter [--profile auto|generic|test|build|json|git-status] [--input file] [--command value] [--report-json]\n       tokray hook filter --agent <agent> [--profile auto|generic|test|build|json|git-status] [--command value] [--exit-code n]\n       tokray hook connect --agent codex [--path .codex/hooks.json] [--apply --expected-after-hash sha256:...]\n       tokray hook status --agent codex [--path .codex/hooks.json]\n       tokray hook self-test --agent codex [--path .codex/hooks.json]\n       tokray hook rewrite --agent <agent> --command "git status"');
       process.exit(0);
     } else if (a !== undefined && !a.startsWith('-')) args.file = a;
   }
@@ -95,6 +95,57 @@ async function discoverNewestSession(): Promise<string | null> {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'gateway') {
+    const upstreamIndex = argv.indexOf('--upstream');
+    const portIndex = argv.indexOf('--port');
+    const hostIndex = argv.indexOf('--host');
+    const budgetIndex = argv.indexOf('--max-input-tokens');
+    const allowToolsIndex = argv.indexOf('--allow-tools');
+    const resultMinIndex = argv.indexOf('--tool-result-min-chars');
+    const upstreamBaseUrl = upstreamIndex >= 0
+      ? argv[upstreamIndex + 1]
+      : process.env['TOKRAY_GATEWAY_UPSTREAM'];
+    const port = portIndex >= 0 ? Number(argv[portIndex + 1]) : 4318;
+    const hostname = hostIndex >= 0 ? argv[hostIndex + 1] : '127.0.0.1';
+    const maxInputTokens = budgetIndex >= 0 ? Number(argv[budgetIndex + 1]) : undefined;
+    const toolResultMinChars = resultMinIndex >= 0 ? Number(argv[resultMinIndex + 1]) : undefined;
+    const allowedTools = allowToolsIndex >= 0
+      ? (argv[allowToolsIndex + 1] ?? '').split(',').map((name) => name.trim()).filter(Boolean)
+      : undefined;
+    if (!upstreamBaseUrl || !hostname
+      || !Number.isInteger(port) || port <= 0 || port > 65_535
+      || (maxInputTokens !== undefined && (!Number.isInteger(maxInputTokens) || maxInputTokens <= 0))
+      || (toolResultMinChars !== undefined && (!Number.isInteger(toolResultMinChars) || toolResultMinChars <= 0))) {
+      console.error('usage: tokray gateway --upstream <url> [--port 4318] [--host 127.0.0.1] [--max-input-tokens n] [--allow-tools names] [--compact-tool-results] [--tool-result-min-chars n]');
+      process.exit(2);
+    }
+    const { startModelGateway } = await import('@tokray/node');
+    const gateway = await startModelGateway({
+      upstreamBaseUrl,
+      hostname,
+      port,
+      governance: {
+        ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+        ...(allowedTools !== undefined ? { allowedTools } : {}),
+        compactToolResults: argv.includes('--compact-tool-results'),
+        ...(toolResultMinChars !== undefined ? { toolResultMinChars } : {}),
+      },
+      onEvent: (event) => {
+        const saved = event.governance?.estimatedSavedTokens ?? 0;
+        console.error(`[gateway] ${event.method} ${event.path} ${event.responseStatus} ${event.status}${saved > 0 ? ` saved~${saved} tokens` : ''} ${event.durationMs}ms`);
+      },
+    });
+    console.log(`Tokray model gateway listening on ${gateway.url}`);
+    console.log(`Forwarding to ${gateway.upstreamBaseUrl}`);
+    console.log(`Health: ${gateway.url}/__tokray/health`);
+    const shutdown = async () => {
+      await gateway.close();
+      process.exit(0);
+    };
+    process.once('SIGINT', () => { void shutdown(); });
+    process.once('SIGTERM', () => { void shutdown(); });
+    return;
+  }
   if (argv[0] === 'request' && argv[1] === 'govern') {
     const inputIndex = argv.indexOf('--input');
     const budgetIndex = argv.indexOf('--max-input-tokens');

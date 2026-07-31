@@ -1,11 +1,11 @@
 # Tokray 产品发展规划书
 
-> 文档状态：执行中（M0 已完成，M1 维护，M2 聚焦单一闭环）
+> 文档状态：执行中（M0 已完成，M1 维护，M2 聚焦 Gateway 闭环）
 > 规划周期：未来 6-12 个月，按里程碑推进
 > 产品属性：开源、厂商中立、Local-first、自托管优先
 > 核心方向：从 Context Token X-ray 演进为 Agent Token 效率与上下文治理平台
 
-> **当前范围锁定（2026-07-28）**：近期只完成一件事，即在一个本地 Codex 会话中跑通“发现高成本工具输出 -> 预览 Tokray Native 过滤 -> 用户批准并信任 `PostToolUse` Hook -> 用后续 Provider Usage 与任务质量信号验证 -> 可回滚”。Request Governor 保留为独立实验能力，不纳入 Codex 端到端闭环声明。该闭环完成前，新增 Agent 适配器、跨会话/团队能力、模型路由、工作流编排、自托管和 RTK 横向扩展全部冻结。
+> **当前范围锁定（2026-07-31）**：近期先跑通一个厂商中立的本地模型 Gateway 闭环，即“Agent 请求 -> 协议识别 -> Tokray Native 治理 -> 固定上游转发 -> Provider Usage 与任务质量验证”。Gateway 是可配置模型 Endpoint 的主数据面；Hook、SDK、MCP 和日志适配器作为能力不同的连接器保留。当前只承诺 OpenAI/Anthropic 兼容请求，Gemini、Vertex、Bedrock 和私有有状态协议需要独立适配器。
 
 ## 1. 执行摘要
 
@@ -66,7 +66,7 @@ Monitor        Govern         Optimize        Orchestrate
 ### 3.2 Tokray 暂时不做什么
 
 - 不做另一个通用 n8n、Dify 或 LangGraph；
-- 不替代模型网关、Prompt 管理平台或完整 LLM 可观测平台；
+- 不扩展为多上游路由、密钥托管、配额计费齐全的通用模型网关，也不替代 Prompt 管理平台或完整 LLM 可观测平台；
 - 不承诺恢复日志中从未记录的隐藏上下文；
 - 不直接声称“节省 60%-90% 总账单”；
 - 不默认上传原始会话、代码、路径或工具结果；
@@ -285,16 +285,16 @@ Tokray 需要同时承担发现、决策、原生治理和验证职责。内置�
 
 内置引擎覆盖九个治理面：模型请求、工具输出、渐进式披露、上下文去重、工具 Schema 按需加载、记忆外化、稳定缓存前缀、Compaction 保护和确定性工作流外置。当前模型请求治理与工具输出过滤是可执行转换；上下文去重、Schema、记忆、缓存和 Compaction 先提供证据诊断；渐进式披露与工作流外置仍处于规划阶段。
 
-模型请求治理直接接受 OpenAI、Anthropic 兼容请求体：保持 `system/messages/input` 不变，压缩工具描述，移除完全相同的重复定义，仅在用户显式提供 allowlist 时裁剪具名工具，并用估算输入预算返回 `sendAllowed`。它能生成可发送的候选请求，但在厂商 Hook 或请求代理未验证接入前，不宣称已自动控制 Claude Code、Codex 等 Agent。
+模型请求治理直接接受 OpenAI、Anthropic 兼容请求体：默认保持 `system/messages/input` 不变，压缩工具描述，移除完全相同的重复定义，仅在用户显式提供 allowlist 时裁剪具名工具，并用估算输入预算返回 `sendAllowed`。本地 Gateway 已能对固定上游应用这些策略、透传鉴权和流式响应；工具结果压缩需要显式开启，只处理 OpenAI Chat `role: tool`、OpenAI Responses `function_call_output` 和 Anthropic `tool_result` 文本。
 
 ### 7.2 集成闭环
 
 ```text
 发现高成本请求或工具输出
--> 选择 Tokray Native 请求治理、输出过滤或 RTK Provider
+-> 选择 Gateway、SDK、Hook、MCP 或只读日志连接器
 -> 原始/治理后请求与输出预览
 -> 估算信息损失与 Token 收益
--> 用户批准安装 Agent Hook
+-> 将可配置 Agent 路由到固定上游 Gateway
 -> 采集 Provider 指标和后续 Usage
 -> 验证真实节省
 -> 保留、调整或回退策略
@@ -315,7 +315,8 @@ Tokray 需要同时承担发现、决策、原生治理和验证职责。内置�
 
 ### 7.4 安全与回退
 
-- 默认只建议，不自动安装 Hook；
+- 默认不压缩工具结果；启用有损治理需要显式参数；
+- Gateway 默认只监听 `127.0.0.1` 且上游在启动时固定，不作为开放代理；
 - 原生过滤异常或 Bridge 未注册时原样透传；
 - 命令失败时保留失败原因、退出码和诊断窗口；
 - 支持项目级排除命令；
@@ -700,16 +701,16 @@ full-content   发送脱敏后的原始内容，显式开启
 
 ## 17. 推荐的近期执行顺序
 
-近期只按以下顺序推进；前一步没有形成可验证证据时，不开启下一条产品线：
+近期只按以下顺序推进；前一步没有形成可验证证据时，不扩大协议范围：
 
-1. [已完成] 从会话证据定位高成本工具结果，并生成确定性的 Tokray Native 过滤预览；
-2. [已完成] 幂等安装项目级 Codex `PostToolUse` Hook，保留 Receipt 与受保护回滚，并通过 Codex `hooks/list` 区分未配置、待信任、已生效与已失效；
-3. [已完成] 提供 `tokray hook status` 与 `tokray hook self-test`，用 0 次模型调用验证 Bridge、Hook、信任和确定性输出过滤链路；
-4. [进行中] 在一个受控任务中记录治理前基线、治理后 Provider Usage、任务结果和必要的人工质量判断；首次 A/B 两组质量均通过，但治理组未触发 Hook，不能计为 Token 节省证据；
-5. [待完成] 将真实对照结果展示为一次实验，明确区分输出缩减估算、实际输入 Token、耗时和质量；
-6. [待完成] 验证回滚后关闭 M2；只有此时才重新评估 M3 或新增 Agent 适配器。
+1. [已完成] 实现固定上游的本地 Gateway，透传路径、鉴权头、状态码和流式响应；
+2. [已完成] 对 OpenAI Chat、OpenAI Responses 与 Anthropic 工具结果提供显式开启的协议感知压缩，并保持非工具消息与调用标识不变；
+3. [已完成] 在调用上游前执行工具 Schema 治理和估算输入预算门禁，提供本地健康与无正文统计；
+4. [进行中] 选择一个允许配置模型 Endpoint 的真实 Agent，记录未治理基线和 Gateway 治理后的 Provider Usage、耗时与任务质量；
+5. [待完成] 把对照结果展示为一次可复现实验，明确区分本地估算、实际输入 Token 和任务质量；
+6. [待完成] 根据真实流量优先级选择下一个协议适配器，再评估 SDK/MCP 连接器产品化。
 
-不进入当前排期：策略作用域、跨会话聚合、团队预算、更多厂商 Hook、模型路由、Workflow Recipe、Collector/Server、安装包分发，以及新的 RTK 能力。发现这些需求时只记录，不实现。
+不进入当前排期：策略作用域、跨会话聚合、团队预算、通用模型路由、Workflow Recipe、Collector/Server、安装包分发，以及新的 RTK 能力。连接器和协议按真实可验证需求增加，不以“所有模型”作为未经验证的发布声明。
 
 ---
 

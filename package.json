@@ -14,7 +14,8 @@
     "typecheck": "pnpm -r --filter './packages/*' exec tsc --noEmit",
     "start": "pnpm web",
     "web": "node packages/cli/dist/main.js web",
-    "web:dev": "pnpm --filter @tokray/web dev"
+    "web:dev": "pnpm --filter @tokray/web dev",
+    "gateway": "node packages/cli/dist/main.js gateway"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

@@ -74,6 +74,18 @@ test('CLI native filter reads stdin and emits compact output without executing a
   assert.doesNotMatch(result.stdout, /worker output item 20/);
 });
 
+test('CLI exposes the model gateway and requires a fixed upstream', () => {
+  const help = spawnSync(process.execPath, [cli, '--help'], { encoding: 'utf8' });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /tokray gateway --upstream <url>/);
+
+  const env = { ...process.env };
+  delete env['TOKRAY_GATEWAY_UPSTREAM'];
+  const missingUpstream = spawnSync(process.execPath, [cli, 'gateway'], { encoding: 'utf8', env });
+  assert.equal(missingUpstream.status, 2);
+  assert.match(missingUpstream.stderr, /gateway --upstream <url>/);
+});
+
 test('CLI request governor emits a governed request without changing messages or parameters', () => {
   const request = {
     model: 'gpt-5',

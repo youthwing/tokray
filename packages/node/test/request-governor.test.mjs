@@ -53,6 +53,8 @@ test('governs OpenAI tool descriptions without changing messages or tool contrac
   assert.ok(result.governed.estimatedTokens.value < result.original.estimatedTokens.value);
   assert.deepEqual(result.integrity, {
     messageContentPreserved: true,
+    nonToolMessageContentPreserved: true,
+    toolResultContractsPreserved: true,
     retainedToolContractsPreserved: true,
     originalInputUnmodified: true,
   });
@@ -153,6 +155,69 @@ test('blocks an over-budget request without truncating messages, system, or inpu
   assert.equal(result.budget.sendAllowed, false);
   assert.deepEqual(result.request.input, input.input);
   assert.ok(result.warnings.includes('request-blocked-by-estimated-input-budget'));
+});
+
+test('compacts only explicit OpenAI Chat tool-result messages when enabled', () => {
+  const repeated = Array.from({ length: 80 }, () => 'BUILD_PROGRESS compiling module batch').join('\n');
+  const input = {
+    model: 'gpt-5',
+    messages: [
+      { role: 'user', content: repeated },
+      { role: 'assistant', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'build', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call-1', content: `${repeated}\nSTATUS=PASS` },
+    ],
+  };
+  const snapshot = structuredClone(input);
+  const result = governNativeRequest(input, { compactToolResults: true, toolResultMinChars: 100 });
+
+  assert.deepEqual(input, snapshot);
+  assert.equal(result.request.messages[0].content, repeated);
+  assert.equal(result.request.messages[2].tool_call_id, 'call-1');
+  assert.match(result.request.messages[2].content, /repeated previous line 79 more times/);
+  assert.match(result.request.messages[2].content, /STATUS=PASS/);
+  assert.equal(result.toolResults.compacted, 1);
+  assert.equal(result.integrity.messageContentPreserved, false);
+  assert.equal(result.integrity.nonToolMessageContentPreserved, true);
+  assert.ok(result.decisions.some((decision) => decision.id === 'compact-tool-results'));
+});
+
+test('compacts OpenAI Responses function outputs and Anthropic tool-result blocks', () => {
+  const repeated = Array.from({ length: 60 }, () => 'test worker completed routine case').join('\n');
+  const openai = governNativeRequest({
+    model: 'gpt-5',
+    input: [
+      { role: 'user', content: repeated },
+      { type: 'function_call_output', call_id: 'call-2', output: `${repeated}\nTests: 60 passed` },
+    ],
+  }, { compactToolResults: true, toolResultMinChars: 100 });
+  assert.equal(openai.request.input[0].content, repeated);
+  assert.equal(openai.request.input[1].call_id, 'call-2');
+  assert.match(openai.request.input[1].output, /repeated previous line 59 more times/);
+
+  const anthropic = governNativeRequest({
+    model: 'claude-sonnet-4',
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: repeated },
+        { type: 'tool_result', tool_use_id: 'tool-2', content: `${repeated}\nSTATUS=PASS` },
+      ],
+    }],
+  }, { compactToolResults: true, toolResultMinChars: 100 });
+  assert.equal(anthropic.request.messages[0].content[0].text, repeated);
+  assert.equal(anthropic.request.messages[0].content[1].tool_use_id, 'tool-2');
+  assert.match(anthropic.request.messages[0].content[1].content, /repeated previous line 59 more times/);
+});
+
+test('keeps tool-result content byte-equivalent unless compaction is explicitly enabled', () => {
+  const content = Array.from({ length: 20 }, () => 'same tool output').join('\n');
+  const input = { model: 'gpt-5', messages: [{ role: 'tool', tool_call_id: 'call-3', content }] };
+  const result = governNativeRequest(input);
+
+  assert.equal(result.request.messages[0].content, content);
+  assert.equal(result.toolResults.inspected, 0);
+  assert.equal(result.integrity.messageContentPreserved, true);
 });
 
 test('rejects invalid budgets and oversized requests', () => {

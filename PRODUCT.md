@@ -18,27 +18,27 @@ Tokray currently provides the Monitor and evidence foundation:
 - attribute Token usage to messages, tools, schemas, files, memory, and compaction summaries;
 - expose provider-reported Usage, cache semantics, uncertainty, and source references;
 - diagnose context peaks, persistent blocks, tool overhead, cache efficiency, compaction, calibration, and parser issues;
-- govern complete OpenAI- and Anthropic-compatible model requests with tool-description compaction, exact-schema deduplication, explicit tool allowlists, and an estimated input-budget gate;
+- govern and forward OpenAI- and Anthropic-compatible model requests through a fixed-upstream local gateway with tool-description compaction, exact-schema deduplication, explicit tool allowlists, optional protocol-aware tool-result compaction, and an estimated input-budget gate;
 - filter tool output with a deterministic built-in engine, preview optional RTK rewrites, run explicitly approved low-risk output comparisons, and register Provider-specific Hook Bridges with receipts and guarded rollback;
 - preserve raw content locally and avoid claiming data the source never recorded.
 
-The native engine currently executes model-request governance and tool-output filtering, diagnoses several additional context-governance surfaces, and labels progressive disclosure and workflow offload as planned. Request governance produces a sendable candidate and can block over-budget requests, but it is not an automatically connected Agent Hook. Persisted policy scopes, verified Agent-native request interception, broader optimization experiments, additional Agent adapters, and Token-aware workflows remain planned capabilities. A Tokray-managed Bridge registration must not be presented as a connected vendor Hook until that integration is verified.
+The native engine currently executes model-request governance and tool-output filtering. A local gateway can apply the request policy to compatible traffic without an Agent Hook, preserve streaming responses, and block over-budget requests before the upstream call. Hooks, SDK middleware, MCP middleware, and log adapters remain capability-specific connectors. Persisted policy scopes, Provider routing profiles, Gemini/Vertex/Bedrock adapters, broader optimization experiments, and Token-aware workflows remain planned capabilities.
 
 ## Current Focus
 
-Tokray has one active product goal: **make the existing Codex tool-output governance loop reliable and verifiable before adding any governance surface**.
+Tokray has one active product goal: **make one provider-neutral gateway governance loop reliable and verifiable before broadening protocol coverage**.
 
 The loop is complete only when a user can:
 
-1. identify a costly tool result from session evidence;
-2. preview the Tokray Native transformation and its information-loss risk;
-3. explicitly connect and trust the Codex `PostToolUse` Hook, with a receipt and guarded rollback;
-4. verify the effective Codex trust state and dispatcher locally without a model call;
-5. compare later provider Usage and a task-quality signal against the baseline.
+1. route one configurable Agent through a fixed-upstream local gateway;
+2. govern tool schemas, tool results, and an estimated input budget without rebuilding Provider-specific fields;
+3. preserve authentication, request paths, response status, and streaming output;
+4. expose local health and metadata-only request statistics;
+5. compare Provider Usage and a task-quality signal against an ungoverned baseline.
 
-Monitor remains the evidence foundation. The Request Governor remains an independent API and laboratory because Codex has no verified pre-model-request Hook; it is not part of the current Codex end-to-end claim.
+Monitor remains the evidence foundation. Codex Hooks remain useful for Agent-local tool paths, but they are no longer the product's universal data plane. The product promise is protocol and capability driven: an opaque Agent or server-side context that never exposes a complete request cannot receive full governance.
 
-Until this loop is verified, additional Agent adapters, governance strategies, cross-session analytics, persisted team policy, model routing, workflow orchestration, self-hosted collection, and broader RTK integration are frozen. They may remain documented as future directions, but they are not parallel development tracks.
+Until this loop is verified, additional Agent adapters, cross-session analytics, persisted team policy, model routing, workflow orchestration, self-hosted collection, and broader RTK integration remain secondary. The next protocol adapters are selected from observed user traffic rather than an unsupported claim of universal coverage.
 
 ## Product Direction
 

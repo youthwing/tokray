@@ -10,17 +10,17 @@ The product direction is a complete evidence loop: **Monitor -> Govern -> Optimi
 
 No hosted service or account is required. Raw logs and conversation content remain local by default.
 
-> **Status: early WIP.** Monitor and the local governance primitives work. The current milestone is deliberately narrower: prove one reversible Codex tool-output governance loop and verify its effect with later provider Usage and a task-quality signal. Request governance and RTK remain supporting experiments, not parallel product tracks.
+> **Status: early WIP.** Monitor and the local governance primitives work. The current milestone is a provider-neutral local model gateway for OpenAI- and Anthropic-compatible traffic, with Codex Hooks, SDK middleware, MCP middleware, and log adapters treated as capability-specific connectors. The gateway MVP is implemented; real Provider Usage and task-quality verification remain.
 
 ## Current target
 
 Tokray is currently optimizing one workflow:
 
 ```text
-session evidence -> output preview -> approved Codex Hook -> later Usage + quality comparison -> rollback
+Agent request -> local gateway -> governed request -> provider Usage + quality comparison -> policy adjustment
 ```
 
-The milestone is not complete until that sequence works on one controlled real session. Until then, new Agent adapters, cross-session/team features, model routing, workflow orchestration, and self-hosted deployment are intentionally deferred. Tokray will not write a real Agent configuration or trigger a model call without explicit user approval.
+The gateway is the primary cross-model data plane. Hooks remain an optional connector for Agent-local tool paths that never reach a configurable model endpoint; MCP middleware covers only its MCP tools; log adapters remain observe-only. The milestone is not complete until one controlled real session proves lower Provider input Usage without degrading task quality. Gemini, Vertex, Bedrock, and proprietary stateful protocols require dedicated protocol adapters and are not claimed by the current MVP.
 
 Read the [Chinese product plan](./PRODUCT_PLAN.zh-CN.md) and the [adapter compatibility contract](./ADAPTERS.md).
 
@@ -42,18 +42,40 @@ pnpm start                                # local UI on 127.0.0.1:4319
 
 Use `pnpm web:dev` while editing the Web client. The CLI equivalents are `node packages/cli/dist/main.js web` for the UI, `node packages/cli/dist/main.js` for the newest local session, and `node packages/cli/dist/main.js path/to/session.jsonl --json out.json` for JSON export. Once the CLI package is published, the intended user-facing entry point is `tokray web`; end users should not need to understand the pnpm workspace.
 
+## Run the local model gateway
+
+Start one gateway for a fixed Provider or OpenAI-compatible endpoint, then point the Agent's model base URL at `http://127.0.0.1:4318`. The incoming path and query string are appended to the upstream prefix, and authorization plus Provider-specific headers pass through without being stored:
+
+```bash
+pnpm gateway -- \
+  --upstream https://api.openai.com \
+  --port 4318 \
+  --max-input-tokens 120000
+```
+
+Tool-description compaction and exact-schema deduplication are enabled by default. Model-visible tool-result compaction is deliberately opt-in because it can remove low-signal lines:
+
+```bash
+pnpm gateway -- \
+  --upstream https://api.example.com \
+  --compact-tool-results \
+  --tool-result-min-chars 2000
+```
+
+The gateway recognizes OpenAI Chat `role: tool`, OpenAI Responses `function_call_output`, and Anthropic `tool_result` text while preserving ordinary messages and tool-result identifiers. It forwards streaming responses incrementally. Local health and aggregate metadata are available at `/__tokray/health` and `/__tokray/stats`; neither endpoint contains request bodies or credentials. Run separate gateway processes for different upstream prefixes in the current MVP.
+
 The built-in output governor can also be used directly in a pipe without installing RTK:
 
 ```bash
-pnpm exec tokray filter --profile auto < tool-output.txt
-pnpm exec tokray filter --profile test --command "pnpm test" < test-output.txt
+node packages/cli/dist/main.js filter --profile auto < tool-output.txt
+node packages/cli/dist/main.js filter --profile test --command "pnpm test" < test-output.txt
 ```
 
-The Native Request Governor accepts OpenAI- and Anthropic-compatible request JSON. By default it preserves `system`, `messages`, and `input`; compacts natural-language tool descriptions; removes only byte-identical duplicate tool definitions; and never removes a named tool unless an explicit allowlist is supplied:
+The Native Request Governor accepts OpenAI- and Anthropic-compatible request JSON. By default it preserves `system`, `messages`, and `input`; compacts natural-language tool descriptions; removes only byte-identical duplicate tool definitions; and never removes a named tool unless an explicit allowlist is supplied. The gateway can explicitly enable conservative tool-result compaction after protocol-aware detection:
 
 ```bash
-pnpm exec tokray request govern --input request.json > governed-request.json
-pnpm exec tokray request govern --input request.json \
+node packages/cli/dist/main.js request govern --input request.json > governed-request.json
+node packages/cli/dist/main.js request govern --input request.json \
   --max-input-tokens 8000 \
   --allow-tools read_file,search_code \
   --report-json
@@ -66,11 +88,11 @@ An over-budget request is returned for inspection but the command exits with sta
 For Codex, the same dispatcher accepts the documented `PostToolUse` JSON object on stdin. It filters plain strings and conservative model-facing text shapes (`output`, `text`, or text content blocks), preserving common scalar execution metadata in replacement feedback. Unknown structured or binary results produce no hook output and continue unchanged. After registering the Tokray Bridge, preview the project-level `.codex/hooks.json` connection, then apply exactly that approved hash:
 
 ```bash
-pnpm exec tokray hook connect --agent codex
-pnpm exec tokray hook connect --agent codex \
+node packages/cli/dist/main.js hook connect --agent codex
+node packages/cli/dist/main.js hook connect --agent codex \
   --apply --expected-after-hash sha256:<hash-from-preview>
-pnpm exec tokray hook status --agent codex
-pnpm exec tokray hook self-test --agent codex
+node packages/cli/dist/main.js hook status --agent codex
+node packages/cli/dist/main.js hook self-test --agent codex
 ```
 
 The connector structurally preserves unrelated Hook groups, replaces stale or duplicate Tokray handlers with one canonical definition, and never rewrites a byte-identical configuration. It writes an action Receipt and supports guarded rollback. `hook status` asks Codex's local `hooks/list` API for the effective `trustStatus`; `hook self-test` runs a deterministic fixture through the local dispatcher with `modelCalls: 0`. The resulting configuration is equivalent to:
@@ -95,7 +117,7 @@ Published installations use the `tokray` command shown above. Source checkouts s
 
 Codex requires non-managed Hooks to be reviewed and trusted with `/hooks` before they run. Tokray does not write `trusted_hash` on the user's behalf: that would bypass Codex's project-command approval boundary. The install, status, and self-test steps are scriptable; the first trust decision remains interactive. Its documented lifecycle surface does not include a pre-model-request event, so this connection governs supported local tool results, not complete model requests.
 
-Other integration points have narrower or different scopes: a Provider request proxy can govern complete outbound request bodies but requires routing Agent traffic through it; an MCP middleware covers only its MCP tools; Shell/RTK wrappers cover commands but not other local tools. For Codex-wide supported tool-result filtering, `PostToolUse` remains the primary integration. Request-proxy work stays separate from the current Hook reliability milestone.
+The gateway is now the primary cross-model integration when an Agent exposes a configurable model endpoint. Codex `PostToolUse` remains useful for supported local tools and deployments that cannot route requests through a gateway. MCP middleware covers only its MCP tools, and Shell/RTK wrappers cover commands but not other local tools. No single connector is presented as universal across opaque or server-side Agent runtimes.
 
 Tokray is currently a source-distributed, local, single-user developer tool: not a signed desktop app and not a team SaaS. Its current architecture is designed for hundreds of discovered sessions and logs in the tens-of-megabytes range on one machine, using an incremental filesystem index, concurrent format probes, on-demand parsing, and an eight-report weighted LRU cache. Standalone binaries and package-manager distribution are release work, not prerequisites for the analysis model.
 
@@ -120,7 +142,7 @@ Output: one stacked bar per model call, plus a session summary — resident-laye
 - a searchable terminology reference covering definitions, calculations, evidence sources, and limitations;
 - evidence-based session governance grouped into issues, optimization opportunities, and healthy signals, with direct navigation to the underlying call, block, tool, compaction, usage, calibration, or parser issue;
 - a dedicated governance action queue that converts findings into read-only `ActionProposal` previews, showing the execution target, capability gate, future-call boundary, risk, evidence count, and estimated impact without claiming an action was applied;
-- a Native Request Governor for OpenAI- and Anthropic-compatible bodies, with tool-description compaction, exact-definition deduplication, explicit tool allowlists, an estimated input-budget gate, before/after JSON, and runtime assertions that message content and retained tool contracts remain unchanged;
+- a Native Request Governor and fixed-upstream local model gateway for OpenAI- and Anthropic-compatible bodies, with tool-description compaction, exact-definition deduplication, explicit tool allowlists, an estimated input-budget gate, optional protocol-aware tool-result compaction, streaming response forwarding, and runtime integrity assertions;
 - a built-in, deterministic output-governance laboratory with `auto`, test, build, JSON, Git-status, and generic profiles; it strips terminal noise, folds repetition, preserves diagnostic windows, marks omitted regions, exposes information-loss risk, and never reports its `bytes / 4` output estimate as billing savings;
 - a native context-engine registry covering model-request governance, output filtering, progressive disclosure, context deduplication, on-demand tool schemas, memory externalization, stable cache prefixes, compaction protection, and deterministic workflow offload; every surface is labeled `available`, `diagnose`, or `planned` instead of being presented as uniformly shipped;
 - optional RTK integration that detects the official `rtk-ai/rtk` binary, imports `rtk gain --all --format json`, previews `rtk rewrite`, and can run an explicitly approved raw/compact comparison for a narrow read-only command allowlist; comparison uses direct process arguments rather than a Shell and records an immutable action receipt;
@@ -213,7 +235,7 @@ export default defineAdapter({
 - [x] Local Web UI (`tokray web`): provider filters, session search, normalized timeline, segmented calibration, provider usage, compaction inspection, on-demand conversation content, frame inspector, tool accounting, anomaly view, bilingual UI, and persisted light/dark themes
 - [x] M0 product foundation: separate Agent/provider identity, explicit Agent capability matrix, evidence-bearing governance findings, policy contract, and adapter conformance rules
 - [ ] M1 Monitor: real-time watch/SSE, professional session navigation/search, JSONL declarative adapters, source inventory, capability matrix, terminology reference, CodeBuddy/Trae research, and Tokray-managed Bridge registration are implemented; verified Cursor/Cline/Continue adapters, vendor-native Hook connections, YAML configuration, and scale acceptance remain
-- [ ] M2 Govern: evidence rules, grouped governance, ActionProposal previews, native request budgeting/tool governance, built-in output filtering, multi-Provider Hook Bridges, RTK detection/gain/rewrite, allowlisted output comparison, action receipts, and guarded rollback are implemented; persisted policy scopes, cross-session aggregation, verified Agent-native request interception, and Usage-backed savings verification remain
+- [ ] M2 Govern: evidence rules, grouped governance, ActionProposal previews, native request budgeting/tool governance, built-in output filtering, fixed-upstream OpenAI/Anthropic-compatible gateway, multi-Provider Hook Bridges, RTK detection/gain/rewrite, action receipts, and guarded rollback are implemented; Provider-specific routing profiles, persisted policy scopes, additional protocols, and Usage-backed savings verification remain
 - [ ] M3 Optimize: context simulations, before/after experiments, capability-driven pricing, quality checks, and sanitized reports
 - [ ] M4 Orchestrate: focused Token-aware workflow recipes and CLI runner for deterministic steps
 - [ ] M5 Ecosystem: `tokray agent` + `tokray serve`, self-hosting, binaries, package managers, and community adapter/action SDKs
