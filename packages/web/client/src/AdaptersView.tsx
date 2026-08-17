@@ -14,7 +14,7 @@ function sourceBoundary(id: string, locale: string, fallback: string): string {
     continue: ['不同版本的会话导出格式不一，需要真实样本验证。', 'Session exports vary by version and require verified fixtures.'],
     windsurf: ['可检测 VS Code 派生存储；不会假设其中包含完整请求。', 'VS Code-derived storage is detectable; complete request visibility is not assumed.'],
     'gemini-cli': ['聊天文件需要经过版本验证的适配器才能分析。', 'Chat files require a verified, versioned adapter before analysis.'],
-    codebuddy: ['可检测安装；直接日志与 Hook 能力仍需要本机真实样本验证。', 'Installation can be detected; log and Hook capabilities still require a verified fixture.'],
+    codebuddy: ['会话历史存储于云端（本地索引为空）；可检测安装，但本地无可解析的会话/用量数据。', 'Sessions are stored server-side (local index is empty); installation is detected, but no local session/usage data is parseable.'],
     trae: ['已发现的 ai-agent 数据库为加密或不透明存储，需要 Hook 或完整请求采集器。', 'The observed ai-agent database is encrypted or opaque; use a verified Hook or request collector.'],
   };
   const note = notes[id];

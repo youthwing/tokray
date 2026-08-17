@@ -43,7 +43,7 @@ export function agentSourceProfiles(input: AgentSourceEnvironment = {}): AgentSo
   const windsurf = editorStoragePaths('Windsurf', environment);
   const trae = editorStoragePaths('Trae', environment);
   const traeCn = editorStoragePaths('Trae CN', environment);
-  const codeBuddy = editorStoragePaths('CodeBuddy', environment);
+  const codeBuddy = [...editorStoragePaths('CodeBuddy', environment), ...editorStoragePaths('CodeBuddy CN', environment)];
   const extensionRoots = [...code, ...cursor, ...windsurf];
   return [
     {
@@ -124,7 +124,7 @@ export function agentSourceProfiles(input: AgentSourceEnvironment = {}): AgentSo
       label: 'CodeBuddy',
       access: 'opaque',
       paths: codeBuddy.flatMap((path) => [join(path, 'globalStorage', 'state.vscdb'), join(path, 'workspaceStorage')]),
-      note: 'Installation can be detected; direct log and Hook capabilities still require a local fixture.',
+      note: 'Sessions are stored server-side (local chat.ChatSessionStore.index is empty); installation is detected but no local session/usage data is parseable.',
     },
     {
       id: 'trae',
